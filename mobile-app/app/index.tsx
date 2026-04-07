@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import { useEffect } from 'react';
 import { useRouter } from 'expo-router';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
@@ -36,20 +35,3 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.neutral.background,
   },
 });
-=======
-import { Text, View } from "react-native";
-
-export default function Index() {
-  return (
-    <View
-      style={{
-        flex: 1,
-        justifyContent: "center",
-        alignItems: "center",
-      }}
-    >
-      <Text>Edit app/index.tsx to edit this screen.</Text>
-    </View>
-  );
-}
->>>>>>> c08538c658e74fe0f7fd241044f26725746d2c06

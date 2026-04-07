@@ -5,6 +5,7 @@
   "type": "module",
   "main": "src/server.js",
   "scripts": {
+    "build": "npx prisma generate && npx prisma db push",
     "start": "node src/server.js",
     "test": "vitest --run",
     "dev": "node --env-file=.env src/server.js"
