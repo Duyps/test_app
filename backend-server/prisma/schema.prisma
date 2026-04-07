@@ -49,8 +49,8 @@ model HealthProfile {
   user_id      String    @unique @db.VarChar(50) // Cực kỳ quan trọng: @unique tạo ra quan hệ 1-1
   height       Float?
   weight       Float?
-  gender       Boolean   
-  birth        DateTime @db.Date
+  gender       Boolean?   
+  birth        DateTime? @db.Date
   systolic_bp  Int? // Huyết áp tâm thu
   diastolic_bp Int? // Huyết áp tâm trương
   updated_at   DateTime? @updatedAt // Tự động cập nhật thời gian khi sửa profile
