@@ -7,7 +7,10 @@ app.use(express.json());
 
 app.use('/api/v1', apiRoutes);
 
-
+// Root route
+app.get('/', (req, res) => {
+    res.json({ message: 'HealthGuard API is running live on Render!' });
+});
 const PORT = process.env.PORT || 3000;
 setupSwagger(app);
 app.listen(PORT, () => {
