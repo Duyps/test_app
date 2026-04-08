@@ -3,7 +3,7 @@ import { evaluateHealthData } from '../services/alert.service.js';
 
 export const syncHealthData = async (req, res) => {
     try {
-        const { device_id, metrics } = req.body;
+        const { metrics } = req.body;
         const currentUserId = req.user.user_id; 
 
         // 1. KIỂM TRA PAYLOAD
@@ -11,16 +11,7 @@ export const syncHealthData = async (req, res) => {
             return res.status(400).json({ status: "error", message: "Payload không hợp lệ." });
         }
 
-        // 2. KIỂM TRA THIẾT BỊ (nếu có device_id)
-        // Cho phép sync từ Health Connect mà không cần device_id cụ thể
-        if (device_id) {
-            const existingDevice = await prisma.device.findFirst({
-                where: { device_id: device_id, user_id: currentUserId, status: "connected" }
-            });
-            if (!existingDevice) {
-                return res.status(403).json({ status: "error", message: "Thiết bị chưa kết nối hoặc đã bị ngắt." });
-            }
-        }
+        // 2. Bỏ qua kiểm tra device - cho phép sync từ Health Connect trực tiếp
 
         // 3. FORMAT DỮ LIỆU ĐẦU VÀO (Khởi tạo dataToInsert ở đây)
         const dataToInsert = metrics.map((m) => ({
