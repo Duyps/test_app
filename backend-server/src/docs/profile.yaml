@@ -24,33 +24,40 @@ paths:
             schema:
               type: object
               properties:
+                full_name: # Thêm họ tên
+                  type: string
+                  example: "Nguyễn Văn A"
                 height:
-                  type: integer
-                  example: 180
+                  type: number # Đổi sang number cho linh hoạt
+                  format: float
+                  example: 170.5
                   nullable: true
                 weight:
                   type: number
                   format: float
-                  example: 68.5
+                  example: 65.0
                   nullable: true
-                gender:
-                  type: boolean
-                  example: true
+                gender: # ĐỔI Ở ĐÂY: Từ boolean sang string
+                  type: string
+                  example: "female"
+                  enum: [male, female, other]
                   nullable: true
                 birth:
                   type: string
-                  format: date-time
-                  example: "2000-01-01T00:00:00.000Z"
+                  format: date
+                  example: "2000-01-01"
                   nullable: true
+                phone_number: # Thêm số điện thoại
+                  type: string
+                  example: "0123456789"
+                blood_type: # Thêm nhóm máu
+                  type: string
+                  example: "O+"
                 systolic_bp:
                   type: integer
-                  description: Huyết áp tâm thu
-                  example: null
                   nullable: true
                 diastolic_bp:
                   type: integer
-                  description: Huyết áp tâm trương
-                  example: null
                   nullable: true
       responses:
         200:

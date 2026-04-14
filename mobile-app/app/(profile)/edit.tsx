@@ -21,7 +21,7 @@ import { api } from '../../services/api';
 type Gender = 'male' | 'female' | 'other';
 type BloodType = 'A+' | 'A-' | 'B+' | 'B-' | 'AB+' | 'AB-' | 'O+' | 'O-';
 
-const BLOOD_TYPES: BloodType[] = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
+const BLOOD_TYPES: BloodType[] = ['A+', 'A-', 'B+' , 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 
 export default function EditProfileScreen() {
   const [fullName, setFullName] = useState('');
@@ -35,22 +35,32 @@ export default function EditProfileScreen() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [hasChanges, setHasChanges] = useState(false);
 
-  // Load current profile data
+  // ==========================================
+  // LOAD DATA (Đã sửa để khớp Backend mới)
+  // ==========================================
   useEffect(() => {
     const loadProfile = async () => {
       try {
         const profile = await api.getProfile();
         if (profile) {
+          // Backend trả về full_name (từ bảng User) và phone_number, blood_type (từ Profile)
           setFullName(profile.full_name || '');
           setPhone(profile.phone_number || '');
-          if (profile.date_of_birth) {
-            const date = new Date(profile.date_of_birth);
-            setBirthDate(`${date.getDate().toString().padStart(2, '0')}/${(date.getMonth() + 1).toString().padStart(2, '0')}/${date.getFullYear()}`);
+          
+          // Sử dụng field 'birth' thay vì 'date_of_birth'
+          if (profile.birth) {
+            const date = new Date(profile.birth);
+            setBirthDate(
+              `${date.getDate().toString().padStart(2, '0')}/${(date.getMonth() + 1)
+                .toString()
+                .padStart(2, '0')}/${date.getFullYear()}`
+            );
           }
-          setGender(profile.gender as Gender || 'male');
+          
+          setGender((profile.gender as Gender) || 'male');
           setHeight(profile.height?.toString() || '');
           setWeight(profile.weight?.toString() || '');
-          setBloodType(profile.blood_type as BloodType || 'O+');
+          setBloodType((profile.blood_type as BloodType) || 'O+');
         }
       } catch (err) {
         console.warn('Could not load profile:', err);
@@ -68,32 +78,36 @@ export default function EditProfileScreen() {
     };
   };
 
+  // ==========================================
+  // SAVE DATA (Đã sửa để khớp Prisma/Backend)
+  // ==========================================
   const handleSave = async () => {
     setLoading(true);
     try {
-      // Parse birthDate from DD/MM/YYYY to ISO date
-      let dateOfBirth = null;
+      // Chuyển định dạng ngày DD/MM/YYYY sang YYYY-MM-DD cho Backend
+      let formattedBirth = null;
       if (birthDate) {
         const parts = birthDate.split('/');
         if (parts.length === 3) {
-          dateOfBirth = `${parts[2]}-${parts[1]}-${parts[0]}`;
+          formattedBirth = `${parts[2]}-${parts[1]}-${parts[0]}`;
         }
       }
 
       await api.updateProfile({
-        full_name: fullName,
-        phone_number: phone,
-        date_of_birth: dateOfBirth || undefined,
-        gender,
+        full_name: fullName,       // Gửi để cập nhật bảng User
+        phone_number: phone,       // Cột mới trong HealthProfile
+        birth: formattedBirth,     // Key 'birth' khớp Prisma
+        gender: gender,            // String 'male'/'female'
         height: height ? parseFloat(height) : null,
         weight: weight ? parseFloat(weight) : null,
-        blood_type: bloodType,
+        blood_type: bloodType,     // Cột mới trong HealthProfile
       });
       
-      Alert.alert('Thành công', 'Thông tin đã được cập nhật', [
+      Alert.alert('Thành công', 'Thông tin sức khỏe đã được cập nhật', [
         { text: 'OK', onPress: () => router.back() },
       ]);
     } catch (error) {
+      console.error('Update error:', error);
       Alert.alert('Lỗi', 'Không thể cập nhật thông tin. Vui lòng thử lại.');
     } finally {
       setLoading(false);
@@ -102,29 +116,14 @@ export default function EditProfileScreen() {
 
   const handleBack = () => {
     if (hasChanges) {
-      Alert.alert(
-        'Hủy thay đổi?',
-        'Các thay đổi chưa được lưu sẽ bị mất.',
-        [
-          { text: 'Tiếp tục chỉnh sửa', style: 'cancel' },
-          { text: 'Hủy', style: 'destructive', onPress: () => router.back() },
-        ]
-      );
+      Alert.alert('Hủy thay đổi?', 'Các thay đổi chưa được lưu sẽ bị mất.', [
+        { text: 'Tiếp tục chỉnh sửa', style: 'cancel' },
+        { text: 'Hủy', style: 'destructive', onPress: () => router.back() },
+      ]);
     } else {
       router.back();
     }
   };
-
-  if (initialLoading) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={Colors.primary.main} />
-          <Text style={styles.loadingText}>Đang tải thông tin...</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
 
   const formatBirthDate = (text: string) => {
     const cleaned = text.replace(/\D/g, '');
@@ -139,6 +138,7 @@ export default function EditProfileScreen() {
     handleChange(setBirthDate)(formatted);
   };
 
+  // BMI Logic
   const bmi = height && weight
     ? (parseFloat(weight) / Math.pow(parseFloat(height) / 100, 2)).toFixed(1)
     : '0';
@@ -152,11 +152,21 @@ export default function EditProfileScreen() {
   };
   const bmiStatus = getBmiStatus();
 
+  if (initialLoading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={Colors.primary.main} />
+          <Text style={styles.loadingText}>Đang tải thông tin...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor={Colors.neutral.background} />
 
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={handleBack}>
           <Ionicons name="arrow-back" size={24} color={Colors.neutral.textPrimary} />
@@ -175,7 +185,6 @@ export default function EditProfileScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Personal Info Section */}
           <Text style={styles.sectionTitle}>Thông tin cá nhân</Text>
           <View style={styles.section}>
             <Input
@@ -203,7 +212,6 @@ export default function EditProfileScreen() {
               maxLength={10}
             />
 
-            {/* Gender Selection */}
             <View style={styles.fieldContainer}>
               <Text style={styles.label}>Giới tính</Text>
               <View style={styles.genderContainer}>
@@ -221,7 +229,7 @@ export default function EditProfileScreen() {
                     onPress={() => handleChange(setGender)(option.value)}
                   >
                     <Ionicons
-                      name={option.icon as keyof typeof Ionicons.glyphMap}
+                      name={option.icon as any}
                       size={20}
                       color={gender === option.value ? Colors.primary.main : Colors.neutral.placeholder}
                     />
@@ -239,7 +247,6 @@ export default function EditProfileScreen() {
             </View>
           </View>
 
-          {/* Health Info Section */}
           <Text style={styles.sectionTitle}>Chỉ số cơ thể</Text>
           <View style={styles.section}>
             <View style={styles.row}>
@@ -261,7 +268,6 @@ export default function EditProfileScreen() {
               </View>
             </View>
 
-            {/* BMI Display */}
             <View style={styles.bmiCard}>
               <View style={styles.bmiHeader}>
                 <Text style={styles.bmiLabel}>Chỉ số BMI</Text>
@@ -286,7 +292,6 @@ export default function EditProfileScreen() {
               </View>
             </View>
 
-            {/* Blood Type */}
             <View style={styles.fieldContainer}>
               <Text style={styles.label}>Nhóm máu</Text>
               <View style={styles.bloodTypeContainer}>
@@ -312,21 +317,8 @@ export default function EditProfileScreen() {
               </View>
             </View>
           </View>
-
-          {/* Medical Conditions */}
-          <Text style={styles.sectionTitle}>Tình trạng sức khỏe</Text>
-          <View style={styles.section}>
-            <TouchableOpacity style={styles.addConditionButton}>
-              <Ionicons name="add-circle-outline" size={24} color={Colors.primary.main} />
-              <Text style={styles.addConditionText}>Thêm tình trạng bệnh lý</Text>
-            </TouchableOpacity>
-            <Text style={styles.conditionHint}>
-              Thông tin này giúp AI phân tích chính xác hơn
-            </Text>
-          </View>
         </ScrollView>
 
-        {/* Save Button */}
         <View style={styles.bottomContainer}>
           <Button
             title="Lưu thay đổi"

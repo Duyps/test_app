@@ -22,20 +22,20 @@ datasource db {
 model User {
   user_id    String    @id @default(uuid()) @db.VarChar(50)
   email      String    @unique @db.VarChar(100)
-  password   String?    @db.VarChar(100)
-  full_name       String    @default("Người dùng vô danh") @db.VarChar(100)
+  password   String?   @db.VarChar(100)
+  
+  // Họ tên chính của tài khoản
+  full_name  String    @default("Người dùng vô danh") @db.VarChar(100)
 
-  reset_otp            String?   @db.VarChar(6)    // Lưu mã OTP 6 số (vd: "123456")
-  otp_expires_at       DateTime?                   // Thời gian hết hạn của OTP (vd: 5 phút)
+  reset_otp       String?   @db.VarChar(6)
+  otp_expires_at  DateTime?
   
   created_at DateTime? @default(now())
 
-  // Quan hệ 1-1 với HealthProfile
+  // Quan hệ
   health_profile HealthProfile?
-
-  // Quan hệ 1-N
-  relatives        Relative[]
-  devices          Device[]
+  relatives      Relative[]
+  devices        Device[]
   workout_sessions WorkoutSession[]
   health_metrics   HealthMetric[]
   alert_logs       AlertLog[]
@@ -43,19 +43,32 @@ model User {
   @@map("user")
 }
 
-// 2. Bảng HEALTH_PROFILE (Tách ra từ User)
+// 2. Bảng HEALTH_PROFILE (Cập nhật để khớp với Frontend Edit Screen)
 model HealthProfile {
   profile_id   String    @id @default(uuid()) @db.VarChar(50)
-  user_id      String    @unique @db.VarChar(50) // Cực kỳ quan trọng: @unique tạo ra quan hệ 1-1
+  user_id      String    @unique @db.VarChar(50)
+  
+  // Thông tin vật lý
   height       Float?
   weight       Float?
-  gender       Boolean?   
-  birth        DateTime? @db.Date
-  systolic_bp  Int? // Huyết áp tâm thu
-  diastolic_bp Int? // Huyết áp tâm trương
-  updated_at   DateTime? @updatedAt // Tự động cập nhật thời gian khi sửa profile
+  
+  // Đổi từ Boolean sang String để lưu 'male', 'female', 'other'
+  gender       String?   @db.VarChar(20) 
+  
+  // Dùng tên 'birth' đồng nhất (hoặc date_of_birth tùy bạn chọn nhưng phải nhất quán)
+  birth        DateTime? @db.Date 
+  
+  // Thêm các trường bạn đang dùng trong Edit Screen
+  phone_number String?   @db.VarChar(20)
+  blood_type   String?   @db.VarChar(10)
+  
+  // Huyết áp (nếu bạn vẫn muốn giữ)
+  systolic_bp  Int? 
+  diastolic_bp Int? 
+  
+  updated_at   DateTime? @updatedAt
 
-  // Liên kết ngược lại User, nếu User bị xóa -> xóa luôn Profile (Cascade)
+  // Quan hệ
   user User @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
 
   @@map("health_profile")

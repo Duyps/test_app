@@ -11,16 +11,18 @@ CREATE TABLE "user" (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );  
 
--- 2. Bảng HEALTH_PROFILE (Hồ sơ sức khỏe - Quan hệ 1-1 với User)
+-- 2. Bảng HEALTH_PROFILE
 CREATE TABLE health_profile (
     profile_id VARCHAR(50) PRIMARY KEY,
-    user_id VARCHAR(50) UNIQUE NOT NULL REFERENCES "user"(user_id) ON DELETE CASCADE, -- UNIQUE đảm bảo quan hệ 1-1
+    user_id VARCHAR(50) UNIQUE NOT NULL REFERENCES "user"(user_id) ON DELETE CASCADE,
     height FLOAT,
     weight FLOAT,
-    gender BOOLEAN,          -- TRUE = Nam, FALSE = Nữ
+    gender VARCHAR(20),      -- ĐỔI Ở ĐÂY: BOOLEAN -> VARCHAR(20)
     birth DATE,
-    systolic_bp INT,     -- Huyết áp tâm thu
-    diastolic_bp INT,    -- Huyết áp tâm trương
+    phone_number VARCHAR(20), -- THÊM CỘT NÀY
+    blood_type VARCHAR(10),   -- THÊM CỘT NÀY
+    systolic_bp INT,
+    diastolic_bp INT,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
