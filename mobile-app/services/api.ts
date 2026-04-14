@@ -127,7 +127,13 @@ export interface ResetPasswordResponse {
   success: boolean;
 }
 
-// Health Metrics Types (Dashboard & Sync)
+// ✅ CẬP NHẬT TYPES CHO SYNC (Để khớp với Backend và sửa lỗi TS)
+export interface SyncRecord {
+  type: 'HEART_RATE' | 'STEPS' | 'BLOOD_OXYGEN' | 'SLEEP' | 'CALORIES' | 'DISTANCE';
+  value: number;
+  time: string;
+}
+
 export interface MetricRecord {
   metric_id?: string;
   record_time: string;
@@ -136,7 +142,7 @@ export interface MetricRecord {
   sleep_duration?: number;
   calories?: number;
   distance?: number;
-  oxygen_saturation?: number;
+  blood_oxygen?: number; // Đổi tên cho đồng bộ với Prisma
   stress_level?: number;
   device_id?: string;
 }
@@ -153,14 +159,17 @@ export interface MetricsResponse {
   };
 }
 
+// ✅ SỬA LỖI: Thêm trường 'data' vào payload sync
 export interface MetricsSyncPayload {
   device_id?: string;
-  metrics: MetricRecord[];
+  metrics?: MetricRecord[]; // Giữ lại để không lỗi code cũ (nếu có)
+  data: SyncRecord[];      // Thêm mới để khớp với Controller và Hook mới
 }
 
 export interface MetricsSyncResponse {
-  message: string;
-  synced_count: number;
+  status: string;         // Backend trả về "success" hoặc "error"
+  count: number;          // Backend trả về result.count
+  message?: string;
 }
 
 // Health Tips Types
@@ -209,30 +218,20 @@ export interface SyncResponse {
 // ===========================================
 // TOKEN MANAGEMENT
 // ===========================================
-import { getToken, getUserData } from './auth';
+import { getToken } from './auth';
 
 // Cache token trong memory để dùng sync
 let cachedToken: string | null = null;
 
-/**
- * Load token từ secure storage vào cache
- * Gọi hàm này khi app khởi động
- */
 export const initializeAuth = async (): Promise<boolean> => {
   cachedToken = await getToken();
   return cachedToken !== null;
 };
 
-/**
- * Set token vào cache (sau khi login)
- */
 export const setAuthToken = (token: string | null) => {
   cachedToken = token;
 };
 
-/**
- * Lấy token từ cache
- */
 export const getAuthToken = () => cachedToken;
 
 // ===========================================
@@ -345,10 +344,6 @@ export const api = {
   // HEALTH METRICS (Dashboard & Sync)
   // ==================
 
-  /**
-   * Lấy lịch sử dữ liệu sức khỏe cho Dashboard
-   * @param params - startDate, endDate (optional)
-   */
   getMetrics: (params?: { startDate?: string; endDate?: string }): Promise<MetricsResponse> => {
     let endpoint = ENDPOINTS.METRICS;
     if (params) {
@@ -361,7 +356,7 @@ export const api = {
   },
 
   /**
-   * Đồng bộ dữ liệu sức khỏe từ thiết bị lên server (Bulk Insert)
+   * ✅ SỬA LỖI: Giữ nguyên tên hàm syncMetrics nhưng cập nhật body JSON
    */
   syncMetrics: (payload: MetricsSyncPayload): Promise<MetricsSyncResponse> =>
     fetchAPI<MetricsSyncResponse>(ENDPOINTS.METRICS, {
@@ -374,9 +369,7 @@ export const api = {
   // ==================
   getHealthData: async (): Promise<HealthDataResponse> => {
     try {
-      // Thử dùng metrics API mới
       const metricsResponse = await api.getMetrics();
-
       if (metricsResponse.metrics && metricsResponse.metrics.length > 0) {
         const latestMetric = metricsResponse.metrics[0];
         const summary = metricsResponse.summary;
@@ -415,42 +408,19 @@ export const api = {
           },
         };
       }
-
       throw new Error('No metrics data');
     } catch {
-      // Không có dữ liệu metrics, trả về default (tất cả = 0)
       return {
         heartRate: {
-          current: 0,
-          min: 0,
-          max: 0,
-          avg: 0,
-          resting: 0,
-          lastMeasured: 'Chưa có dữ liệu',
-          device: 'Chưa kết nối',
-          trend: 'stable' as const,
+          current: 0, min: 0, max: 0, avg: 0, resting: 0,
+          lastMeasured: 'Chưa có dữ liệu', device: 'Chưa kết nối', trend: 'stable' as const,
         },
         sleep: {
-          duration: 0,
-          quality: 0,
-          deepSleep: 0,
-          lightSleep: 0,
-          remSleep: 0,
-          awake: 0,
-          bedTime: '--:--',
-          wakeTime: '--:--',
-          device: 'Chưa kết nối',
+          duration: 0, quality: 0, deepSleep: 0, lightSleep: 0,
+          remSleep: 0, awake: 0, bedTime: '--:--', wakeTime: '--:--', device: 'Chưa kết nối',
         },
-        steps: {
-          current: 0,
-          goal: 10000,
-          distance: 0,
-          calories: 0,
-        },
-        water: {
-          current: 0,
-          goal: 2500,
-        },
+        steps: { current: 0, goal: 10000, distance: 0, calories: 0, },
+        water: { current: 0, goal: 2500, },
       };
     }
   },
@@ -479,7 +449,7 @@ export const api = {
     }),
 
   // ==================
-  // RELATIVES (Liên hệ khẩn cấp)
+  // RELATIVES
   // ==================
   getRelatives: (): Promise<RelativeResponse[]> =>
     fetchAPI<RelativeResponse[]>(ENDPOINTS.RELATIVES),
@@ -502,13 +472,13 @@ export const api = {
     }),
 
   // ==================
-  // ALERTS (Lịch sử cảnh báo)
+  // ALERTS
   // ==================
   getAlerts: (): Promise<{ status: string; message: string; data: AlertLogResponse[] }> =>
     fetchAPI<{ status: string; message: string; data: AlertLogResponse[] }>(ENDPOINTS.ALERTS),
 
   // ==================
-  // HEALTH TIPS (Mẹo sức khỏe)
+  // HEALTH TIPS
   // ==================
   getHealthTips: (category?: string): Promise<HealthTip[]> => {
     let endpoint = ENDPOINTS.HEALTH_TIPS;

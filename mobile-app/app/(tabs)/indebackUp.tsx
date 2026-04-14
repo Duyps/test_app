@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+/*import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -13,197 +13,162 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, BorderRadius, Shadows } from '../../constants/Colors';
-import { useHealthData, DEFAULT_CHART_DATA } from '../../hooks/useHealthData';
+import { useHealthData } from '../../hooks/useHealthData';
 import { getUserData } from '../../services/auth';
 import { useHealthTips } from '../../hooks/useHealthTips';
+
+interface HealthRecord {
+  user_id: string;
+  record_time: Date;
+  heart_rate: number | null;
+  steps: number | null;
+  blood_oxygen: number | null;
+  calories: number | null;
+  distance: number | null;
+  sleep_duration: number | null;
+}
 
 type TimeRange = 'day' | 'week' | 'month';
 
 export default function HomeScreen() {
   const [timeRange, setTimeRange] = useState<TimeRange>('day');
   const [userName, setUserName] = useState<string>('');
-  // Get data from API (không cần userId vì API dùng token xác thực)
-  const { data: HEALTH_DATA, chartData, loading, error, refresh, isConnected } = useHealthData();
+  
+  const healthDataHook = useHealthData();
+  
+  // Kiểm tra kỹ dữ liệu đầu vào. Nếu không phải mảng, ép về mảng rỗng ngay lập tức.
+  const rawData = healthDataHook?.data;
+  const data = useMemo(() => {
+    return Array.isArray(rawData) ? (rawData as HealthRecord[]) : [];
+  }, [rawData]);
+  
+  const loading = healthDataHook?.loading || false;
+  const error = healthDataHook?.error;
+  const refresh = healthDataHook?.refresh;
+  const isConnected = healthDataHook?.isConnected || false;
+
   const { randomTip } = useHealthTips();
 
-  // Tính health score từ dữ liệu thực
+  // Logic xử lý dữ liệu an toàn
+  const processedData = useMemo(() => {
+    // Luôn khởi tạo giá trị mặc định để tránh lỗi undefined trong render
+    const defaultData = {
+      heartRate: { current: 0, min: 0, max: 0, avg: 0, history: [] as number[] },
+      oxygen: { current: 0, history: [] as number[] },
+      steps: { current: 0, goal: 10000 },
+      sleep: { duration: 0, quality: 0 }
+    };
+
+    if (!data || data.length === 0) return defaultData;
+
+    const validHeartRates = data.filter(r => r && r.heart_rate !== null).map(r => r.heart_rate as number);
+    const validSteps = data.filter(r => r && r.steps !== null).map(r => r.steps as number);
+    const validOxygen = data.filter(r => r && r.blood_oxygen !== null).map(r => r.blood_oxygen as number);
+    const validSleep = data.filter(r => r && r.sleep_duration !== null).map(r => r.sleep_duration as number);
+
+    return {
+      heartRate: {
+        current: validHeartRates.length ? validHeartRates[validHeartRates.length - 1] : 0,
+        min: validHeartRates.length ? Math.min(...validHeartRates) : 0,
+        max: validHeartRates.length ? Math.max(...validHeartRates) : 0,
+        avg: validHeartRates.length ? Math.round(validHeartRates.reduce((a, b) => a + b, 0) / validHeartRates.length) : 0,
+        history: validHeartRates.slice(-7),
+      },
+      oxygen: {
+        current: validOxygen.length ? validOxygen[validOxygen.length - 1] : 0,
+        history: validOxygen.slice(-7)
+      },
+      steps: {
+        current: validSteps.reduce((a, b) => a + b, 0),
+        goal: 10000,
+      },
+      sleep: {
+        duration: validSleep.reduce((a, b) => a + b, 0),
+        quality: 85,
+      }
+    };
+  }, [data]);
+
   const healthScore = useMemo(() => {
-    let score = 50; // Base score
-    const hr = HEALTH_DATA.heartRate;
-    const sl = HEALTH_DATA.sleep;
-    const st = HEALTH_DATA.steps;
+    let score = 60; 
+    if (processedData.oxygen.current >= 95) score += 20;
+    if (processedData.heartRate.avg >= 60 && processedData.heartRate.avg <= 100) score += 20;
+    return Math.min(100, score);
+  }, [processedData]);
 
-    // Nhịp tim (max +20): 60-100 BPM là tốt
-    if (hr.current > 0) {
-      if (hr.current >= 60 && hr.current <= 100) score += 20;
-      else if (hr.current >= 50 && hr.current <= 110) score += 10;
-    }
+  const onRefresh = useCallback(() => {
+    if (refresh) refresh();
+  }, [refresh]);
 
-    // Giấc ngủ (max +15): 7-9h là tốt
-    if (sl.duration > 0) {
-      if (sl.duration >= 7 && sl.duration <= 9) score += 15;
-      else if (sl.duration >= 6) score += 8;
-    }
-
-    // Bước chân (max +15): đạt 100% goal
-    if (st.current > 0 && st.goal > 0) {
-      const ratio = Math.min(st.current / st.goal, 1);
-      score += Math.round(ratio * 15);
-    }
-
-    return Math.min(100, Math.max(0, score));
-  }, [HEALTH_DATA]);
-
-  const healthScoreStatus = useMemo(() => {
-    if (healthScore >= 80) return 'Tốt';
-    if (healthScore >= 60) return 'Khá';
-    if (healthScore >= 40) return 'Trung bình';
-    return 'Cần cải thiện';
-  }, [healthScore]);
-
-  // Lấy tên user từ storage
   useEffect(() => {
     const loadUserName = async () => {
-      const userData = await getUserData();
-      if (userData?.name) {
-        setUserName(userData.name);
-      } else if (userData?.email) {
-        // Fallback: lấy phần trước @ của email
-        setUserName(userData.email.split('@')[0]);
+      try {
+        const userData = await getUserData();
+        if (userData?.name) setUserName(userData.name);
+        else if (userData?.email) setUserName(userData.email.split('@')[0]);
+      } catch (e) {
+        //console.log("Error loading user name", e);
       }
     };
     loadUserName();
   }, []);
 
-  const getGreeting = () => {
-    const hour = new Date().getHours();
-    if (hour < 12) return 'Chào buổi sáng';
-    if (hour < 18) return 'Chào buổi chiều';
-    return 'Chào buổi tối';
-  };
-
-  const renderMiniChart = (data: number[], color: string, height: number = 40) => {
-    const max = Math.max(...data);
-    const min = Math.min(...data);
+  const renderMiniChart = (chartData: number[], color: string) => {
+    if (!chartData || chartData.length === 0) return <View style={styles.miniChart} />;
+    const max = Math.max(...chartData, 1);
+    const min = Math.min(...chartData, 0);
     const range = max - min || 1;
 
     return (
       <View style={styles.miniChart}>
-        {data.map((value, index) => {
-          const barHeight = ((value - min) / range) * height + 8;
-          const isLast = index === data.length - 1;
-          return (
-            <View
-              key={index}
-              style={[
-                styles.miniChartBar,
-                {
-                  height: barHeight,
-                  backgroundColor: isLast ? color : color + '60',
-                },
-              ]}
-            />
-          );
-        })}
+        {chartData.map((value, index) => (
+          <View key={index} style={[styles.miniChartBar, { 
+            height: ((value - min) / range) * 40 + 8, 
+            backgroundColor: index === chartData.length - 1 ? color : color + '40' 
+          }]} />
+        ))}
       </View>
     );
-  };
-
-  const getTrendIcon = (trend: string) => {
-    switch (trend) {
-      case 'up':
-        return { icon: 'trending-up', color: Colors.status.error };
-      case 'down':
-        return { icon: 'trending-down', color: Colors.status.success };
-      default:
-        return { icon: 'remove', color: Colors.neutral.textSecondary };
-    }
   };
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar barStyle="light-content" backgroundColor={Colors.primary.main} />
 
-      {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerContent}>
           <View>
-            <Text style={styles.greeting}>{getGreeting()},</Text>
+            <Text style={styles.greeting}>Xin chào,</Text>
             <Text style={styles.userName}>{userName || 'Người dùng'}</Text>
           </View>
-          <TouchableOpacity 
-            style={styles.notificationButton}
-            onPress={() => router.push('/notifications' as any)}
-          >
+          <TouchableOpacity style={styles.notificationButton}>
             <Ionicons name="notifications-outline" size={24} color={Colors.neutral.white} />
-            {isConnected && HEALTH_DATA.heartRate.current > 0 && (
-              <View style={styles.notificationBadge} />
-            )}
           </TouchableOpacity>
         </View>
 
-        {/* Time Range Selector */}
         <View style={styles.timeRangeContainer}>
-          {(['day', 'week', 'month'] as TimeRange[]).map((range) => (
-            <TouchableOpacity
-              key={range}
-              style={[
-                styles.timeRangeButton,
-                timeRange === range && styles.timeRangeButtonActive,
-              ]}
-              onPress={() => setTimeRange(range)}
+          {(['day', 'week', 'month'] as TimeRange[]).map((r) => (
+            <TouchableOpacity 
+              key={r} 
+              style={[styles.timeRangeButton, timeRange === r && styles.timeRangeButtonActive]} 
+              onPress={() => setTimeRange(r)}
             >
-              <Text
-                style={[
-                  styles.timeRangeText,
-                  timeRange === range && styles.timeRangeTextActive,
-                ]}
-              >
-                {range === 'day' ? 'Hôm nay' : range === 'week' ? 'Tuần' : 'Tháng'}
+              <Text style={[styles.timeRangeText, timeRange === r && styles.timeRangeTextActive]}>
+                {r === 'day' ? 'Hôm nay' : r === 'week' ? 'Tuần' : 'Tháng'}
               </Text>
             </TouchableOpacity>
           ))}
         </View>
       </View>
 
-      <ScrollView
-        style={styles.content}
+      <ScrollView 
+        style={styles.content} 
         contentContainerStyle={styles.contentContainer}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl 
-            refreshing={loading} 
-            onRefresh={refresh}
-            colors={[Colors.primary.main]}
-            tintColor={Colors.primary.main}
-          />
+          <RefreshControl refreshing={loading} onRefresh={onRefresh} colors={[Colors.primary.main]} />
         }
       >
-        {/* Info Banner - Khi chưa có dữ liệu từ thiết bị */}
-        {!isConnected && !loading && (
-          <View style={styles.infoBanner}>
-            <Ionicons name="information-circle-outline" size={16} color={Colors.primary.main} />
-            <Text style={styles.infoText}>Kết nối thiết bị để xem dữ liệu sức khỏe của bạn.</Text>
-          </View>
-        )}
-
-        {/* Connection Error Banner */}
-        {error && (
-          <View style={styles.errorBanner}>
-            <Ionicons name="cloud-offline-outline" size={16} color={Colors.status.error} />
-            <Text style={styles.errorText}>Không thể kết nối server. Kéo xuống để thử lại.</Text>
-          </View>
-        )}
-
-        {/* Loading State */}
-        {loading && !HEALTH_DATA.heartRate.current && (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={Colors.primary.main} />
-            <Text style={styles.loadingText}>Đang tải dữ liệu...</Text>
-          </View>
-        )}
-
-        {/* Health Score Card */}
         <View style={styles.healthScoreCard}>
           <View style={styles.healthScoreLeft}>
             <Text style={styles.healthScoreLabel}>Điểm sức khỏe</Text>
@@ -211,7 +176,7 @@ export default function HomeScreen() {
               <Text style={styles.healthScoreValue}>{healthScore}</Text>
               <Text style={styles.healthScoreUnit}>/100</Text>
             </View>
-            <Text style={styles.healthScoreStatus}>{healthScoreStatus}</Text>
+            <Text style={styles.healthScoreStatus}>{healthScore >= 80 ? 'Rất Tốt' : 'Ổn định'}</Text>
           </View>
           <View style={styles.healthScoreRight}>
             <View style={styles.scoreCircle}>
@@ -222,225 +187,71 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* Heart Rate Card */}
-        <TouchableOpacity
-          style={styles.metricCard}
-          onPress={() => router.push('/(health)/heart-rate-detail')}
-          activeOpacity={0.7}
-        >
+        <TouchableOpacity style={styles.metricCard} onPress={() => router.push('/(health)/heart-rate-detail')}>
           <View style={styles.metricHeader}>
-            <View style={styles.metricIconContainer}>
-              <Ionicons name="heart" size={20} color={Colors.health.heartRate} />
-            </View>
+            <View style={styles.metricIconContainer}><Ionicons name="heart" size={20} color={Colors.health.heartRate} /></View>
             <View style={styles.metricTitleContainer}>
               <Text style={styles.metricTitle}>Nhịp tim</Text>
-              <View style={styles.deviceInfo}>
-                <Ionicons name="watch-outline" size={12} color={Colors.neutral.textSecondary} />
-                <Text style={styles.deviceText}>{HEALTH_DATA.heartRate.device}</Text>
-                <Text style={styles.timeText}>• {HEALTH_DATA.heartRate.lastMeasured}</Text>
-              </View>
+              <Text style={styles.deviceText}>Dữ liệu trực tiếp</Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color={Colors.neutral.placeholder} />
           </View>
-
           <View style={styles.metricBody}>
             <View style={styles.metricMainValue}>
-              <Text style={styles.mainValueText}>{HEALTH_DATA.heartRate.current}</Text>
-              <Text style={styles.mainValueUnit}>BPM</Text>
-              <View style={styles.trendBadge}>
-                <Ionicons
-                  name={getTrendIcon(HEALTH_DATA.heartRate.trend).icon as keyof typeof Ionicons.glyphMap}
-                  size={14}
-                  color={getTrendIcon(HEALTH_DATA.heartRate.trend).color}
-                />
-              </View>
+              <Text style={styles.mainValueText}>{processedData.heartRate.current}</Text>
+              <Text style={styles.mainValueUnit}> BPM</Text>
             </View>
-
-            <View style={styles.metricChart}>
-              {renderMiniChart(chartData.heartRate, Colors.health.heartRate)}
-            </View>
+            <View style={styles.metricChart}>{renderMiniChart(processedData.heartRate.history, Colors.health.heartRate)}</View>
           </View>
-
           <View style={styles.metricFooter}>
-            <View style={styles.metricStat}>
-              <Text style={styles.statLabel}>Thấp nhất</Text>
-              <Text style={styles.statValue}>{HEALTH_DATA.heartRate.min}</Text>
-            </View>
+            <Text style={styles.statLabel}>Min: <Text style={styles.statValue}>{processedData.heartRate.min}</Text></Text>
             <View style={styles.metricStatDivider} />
-            <View style={styles.metricStat}>
-              <Text style={styles.statLabel}>Trung bình</Text>
-              <Text style={styles.statValue}>{HEALTH_DATA.heartRate.avg}</Text>
-            </View>
+            <Text style={styles.statLabel}>Avg: <Text style={styles.statValue}>{processedData.heartRate.avg}</Text></Text>
             <View style={styles.metricStatDivider} />
-            <View style={styles.metricStat}>
-              <Text style={styles.statLabel}>Cao nhất</Text>
-              <Text style={styles.statValue}>{HEALTH_DATA.heartRate.max}</Text>
-            </View>
+            <Text style={styles.statLabel}>Max: <Text style={styles.statValue}>{processedData.heartRate.max}</Text></Text>
           </View>
         </TouchableOpacity>
 
-        {/* Sleep Card */}
-        <TouchableOpacity
-          style={styles.metricCard}
-          onPress={() => router.push('/(health)/sleep-detail')}
-          activeOpacity={0.7}
-        >
+        <View style={styles.metricCard}>
           <View style={styles.metricHeader}>
-            <View style={[styles.metricIconContainer, { backgroundColor: Colors.health.sleep + '20' }]}>
-              <Ionicons name="moon" size={20} color={Colors.health.sleep} />
-            </View>
+            <View style={[styles.metricIconContainer, { backgroundColor: '#E0F2FE' }]}><Ionicons name="water" size={20} color="#0EA5E9" /></View>
             <View style={styles.metricTitleContainer}>
-              <Text style={styles.metricTitle}>Giấc ngủ</Text>
-              <View style={styles.deviceInfo}>
-                <Ionicons name="watch-outline" size={12} color={Colors.neutral.textSecondary} />
-                <Text style={styles.deviceText}>{HEALTH_DATA.sleep.device}</Text>
-                <Text style={styles.timeText}>• Đêm qua</Text>
-              </View>
+              <Text style={styles.metricTitle}>Nồng độ Oxy (SpO2)</Text>
+              <Text style={styles.deviceText}>Tính toán từ cảm biến</Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color={Colors.neutral.placeholder} />
           </View>
-
           <View style={styles.metricBody}>
             <View style={styles.metricMainValue}>
-              <Text style={styles.mainValueText}>{HEALTH_DATA.sleep.duration}</Text>
-              <Text style={styles.mainValueUnit}>giờ</Text>
-              <View style={[styles.qualityBadge, { backgroundColor: Colors.status.successLight }]}>
-                <Text style={[styles.qualityText, { color: Colors.status.success }]}>
-                  {HEALTH_DATA.sleep.quality}%
-                </Text>
-              </View>
+              <Text style={styles.mainValueText}>{processedData.oxygen.current}</Text>
+              <Text style={styles.mainValueUnit}> %</Text>
             </View>
-
-            <View style={styles.metricChart}>
-              {renderMiniChart(chartData.sleep, Colors.health.sleep)}
-            </View>
-          </View>
-
-          {/* Sleep Stages */}
-          <View style={styles.sleepStages}>
-            <View style={styles.sleepStageBar}>
-              <View
-                style={[
-                  styles.sleepStageSegment,
-                  { flex: HEALTH_DATA.sleep.deepSleep, backgroundColor: '#5B21B6' },
-                ]}
-              />
-              <View
-                style={[
-                  styles.sleepStageSegment,
-                  { flex: HEALTH_DATA.sleep.lightSleep, backgroundColor: '#8B5CF6' },
-                ]}
-              />
-              <View
-                style={[
-                  styles.sleepStageSegment,
-                  { flex: HEALTH_DATA.sleep.remSleep, backgroundColor: '#A78BFA' },
-                ]}
-              />
-              <View
-                style={[
-                  styles.sleepStageSegment,
-                  { flex: HEALTH_DATA.sleep.awake, backgroundColor: Colors.neutral.border },
-                ]}
-              />
-            </View>
-          </View>
-
-          <View style={styles.metricFooter}>
-            <View style={styles.metricStat}>
-              <View style={[styles.stageDot, { backgroundColor: '#5B21B6' }]} />
-              <Text style={styles.statLabel}>Sâu</Text>
-              <Text style={styles.statValue}>{HEALTH_DATA.sleep.deepSleep}h</Text>
-            </View>
-            <View style={styles.metricStat}>
-              <View style={[styles.stageDot, { backgroundColor: '#8B5CF6' }]} />
-              <Text style={styles.statLabel}>Nhẹ</Text>
-              <Text style={styles.statValue}>{HEALTH_DATA.sleep.lightSleep}h</Text>
-            </View>
-            <View style={styles.metricStat}>
-              <View style={[styles.stageDot, { backgroundColor: '#A78BFA' }]} />
-              <Text style={styles.statLabel}>REM</Text>
-              <Text style={styles.statValue}>{HEALTH_DATA.sleep.remSleep}h</Text>
-            </View>
-          </View>
-
-          <View style={styles.sleepTimeRow}>
-            <View style={styles.sleepTimeItem}>
-              <Ionicons name="bed-outline" size={16} color={Colors.neutral.textSecondary} />
-              <Text style={styles.sleepTimeText}>Đi ngủ: {HEALTH_DATA.sleep.bedTime}</Text>
-            </View>
-            <View style={styles.sleepTimeItem}>
-              <Ionicons name="sunny-outline" size={16} color={Colors.neutral.textSecondary} />
-              <Text style={styles.sleepTimeText}>Thức dậy: {HEALTH_DATA.sleep.wakeTime}</Text>
-            </View>
-          </View>
-        </TouchableOpacity>
-
-        {/* Steps & Water Row */}
-        <View style={styles.smallCardsRow}>
-          {/* Steps Card */}
-          <View style={styles.smallCard}>
-            <View style={[styles.smallCardIcon, { backgroundColor: Colors.health.steps + '20' }]}>
-              <Ionicons name="footsteps" size={20} color={Colors.health.steps} />
-            </View>
-            <Text style={styles.smallCardValue}>
-              {HEALTH_DATA.steps.current.toLocaleString()}
-            </Text>
-            <Text style={styles.smallCardLabel}>bước</Text>
-            <View style={styles.progressBar}>
-              <View
-                style={[
-                  styles.progressFill,
-                  {
-                    width: `${Math.min((HEALTH_DATA.steps.current / HEALTH_DATA.steps.goal) * 100, 100)}%`,
-                    backgroundColor: Colors.health.steps,
-                  },
-                ]}
-              />
-            </View>
-            <Text style={styles.goalText}>
-              Mục tiêu: {HEALTH_DATA.steps.goal.toLocaleString()}
-            </Text>
-          </View>
-
-          {/* Water Card */}
-          <View style={styles.smallCard}>
-            <View style={[styles.smallCardIcon, { backgroundColor: Colors.health.water + '20' }]}>
-              <Ionicons name="water" size={20} color={Colors.health.water} />
-            </View>
-            <Text style={styles.smallCardValue}>{HEALTH_DATA.water.current}</Text>
-            <Text style={styles.smallCardLabel}>ml</Text>
-            <View style={styles.progressBar}>
-              <View
-                style={[
-                  styles.progressFill,
-                  {
-                    width: `${Math.min((HEALTH_DATA.water.current / HEALTH_DATA.water.goal) * 100, 100)}%`,
-                    backgroundColor: Colors.health.water,
-                  },
-                ]}
-              />
-            </View>
-            <Text style={styles.goalText}>
-              Mục tiêu: {HEALTH_DATA.water.goal}ml
-            </Text>
+            <View style={styles.metricChart}>{renderMiniChart(processedData.oxygen.history, "#0EA5E9")}</View>
           </View>
         </View>
 
-        {/* Quick Tips */}
-        <View style={styles.tipsCard}>
-          <View style={styles.tipsHeader}>
-            <Ionicons name="bulb" size={20} color={Colors.secondary.orange} />
-            <Text style={styles.tipsTitle}>{randomTip?.title || 'Gợi ý hôm nay'}</Text>
+        <View style={styles.smallCardsRow}>
+          <View style={styles.smallCard}>
+            <View style={[styles.smallCardIcon, { backgroundColor: Colors.health.steps + '20' }]}><Ionicons name="footsteps" size={20} color={Colors.health.steps} /></View>
+            <Text style={styles.smallCardValue}>{processedData.steps.current.toLocaleString()}</Text>
+            <Text style={styles.smallCardLabel}>bước</Text>
           </View>
-          <Text style={styles.tipsText}>
-            {randomTip?.content || 'Hãy duy trì thói quen tập luyện và ngủ đủ giấc để có sức khỏe tốt!'}
-          </Text>
+
+          <View style={styles.smallCard}>
+            <View style={[styles.smallCardIcon, { backgroundColor: Colors.health.sleep + '20' }]}><Ionicons name="moon" size={20} color={Colors.health.sleep} /></View>
+            <Text style={styles.smallCardValue}>{processedData.sleep.duration}</Text>
+            <Text style={styles.smallCardLabel}>giờ ngủ</Text>
+          </View>
+        </View>
+
+        <View style={styles.tipsCard}>
+          <Text style={styles.tipsTitle}>💡 {randomTip?.title || 'Gợi ý'}</Text>
+          <Text style={styles.tipsText}>{randomTip?.content || 'Uống đủ nước để duy trì sức khỏe tốt nhất.'}</Text>
         </View>
       </ScrollView>
     </SafeAreaView>
   );
 }
+
 
 const styles = StyleSheet.create({
   container: {
@@ -605,19 +416,10 @@ const styles = StyleSheet.create({
     fontWeight: Typography.fontWeights.semibold,
     color: Colors.neutral.textPrimary,
   },
-  deviceInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 2,
-    gap: 4,
-  },
   deviceText: {
     fontSize: Typography.fontSizes.xs,
     color: Colors.neutral.textSecondary,
-  },
-  timeText: {
-    fontSize: Typography.fontSizes.xs,
-    color: Colors.neutral.placeholder,
+    marginTop: 2,
   },
   metricBody: {
     flexDirection: 'row',
@@ -637,23 +439,6 @@ const styles = StyleSheet.create({
   mainValueUnit: {
     fontSize: Typography.fontSizes.base,
     color: Colors.neutral.textSecondary,
-    marginLeft: 4,
-  },
-  trendBadge: {
-    marginLeft: Spacing.sm,
-    padding: 4,
-    backgroundColor: Colors.neutral.background,
-    borderRadius: BorderRadius.sm,
-  },
-  qualityBadge: {
-    marginLeft: Spacing.sm,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 2,
-    borderRadius: BorderRadius.full,
-  },
-  qualityText: {
-    fontSize: Typography.fontSizes.xs,
-    fontWeight: Typography.fontWeights.semibold,
   },
   metricChart: {
     width: 100,
@@ -671,19 +456,6 @@ const styles = StyleSheet.create({
     borderRadius: 2,
     minHeight: 8,
   },
-  sleepStages: {
-    marginBottom: Spacing.md,
-  },
-  sleepStageBar: {
-    flexDirection: 'row',
-    height: 8,
-    borderRadius: 4,
-    overflow: 'hidden',
-    gap: 2,
-  },
-  sleepStageSegment: {
-    borderRadius: 4,
-  },
   metricFooter: {
     flexDirection: 'row',
     justifyContent: 'space-around',
@@ -694,17 +466,11 @@ const styles = StyleSheet.create({
   metricStat: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 4,
   },
   metricStatDivider: {
     width: 1,
     height: 20,
     backgroundColor: Colors.neutral.border,
-  },
-  stageDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
   },
   statLabel: {
     fontSize: Typography.fontSizes.xs,
@@ -714,21 +480,6 @@ const styles = StyleSheet.create({
     fontSize: Typography.fontSizes.sm,
     fontWeight: Typography.fontWeights.semibold,
     color: Colors.neutral.textPrimary,
-  },
-  sleepTimeRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginTop: Spacing.md,
-    paddingTop: Spacing.sm,
-  },
-  sleepTimeItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.xs,
-  },
-  sleepTimeText: {
-    fontSize: Typography.fontSizes.sm,
-    color: Colors.neutral.textSecondary,
   },
   smallCardsRow: {
     flexDirection: 'row',
@@ -772,15 +523,12 @@ const styles = StyleSheet.create({
     height: '100%',
     borderRadius: 3,
   },
-  goalText: {
-    fontSize: Typography.fontSizes.xs,
-    color: Colors.neutral.placeholder,
-    marginTop: Spacing.xs,
-  },
   tipsCard: {
     backgroundColor: Colors.status.warningLight,
     borderRadius: BorderRadius.lg,
     padding: Spacing.md,
+    borderLeftWidth: 4,
+    borderLeftColor: Colors.secondary.orange,
   },
   tipsHeader: {
     flexDirection: 'row',
@@ -798,7 +546,6 @@ const styles = StyleSheet.create({
     color: Colors.neutral.textSecondary,
     lineHeight: 20,
   },
-  // ✅ Styles mới cho loading và error states
   errorBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -827,14 +574,135 @@ const styles = StyleSheet.create({
     fontSize: Typography.fontSizes.sm,
     color: Colors.primary.main,
   },
-  loadingContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: Spacing['2xl'],
-  },
-  loadingText: {
-    marginTop: Spacing.md,
-    fontSize: Typography.fontSizes.base,
-    color: Colors.neutral.textSecondary,
-  },
+});*/
+
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
+import { initialize, requestPermission, readRecords, getSdkStatus, SdkAvailabilityStatus } from 'react-native-health-connect';
+import { Ionicons } from '@expo/vector-icons';
+import api from '../../services/api'; 
+
+export default function HealthDashboard() {
+  const [loading, setLoading] = useState(false);
+  const [dataGroups, setDataGroups] = useState<any>({});
+
+  const syncToDatabase = async (rawData: any) => {
+    try {
+      //console.log("🔄 [Sync] Bắt đầu chuẩn hóa dữ liệu cho Backend...");
+      
+      // Backend yêu cầu mảng nằm trong key "data"
+      // Và mỗi item phải có: type, value, time
+      const allRecords: any[] = [];
+
+      // Map Bước chân
+      rawData.Steps.forEach((r: any) => {
+        allRecords.push({ type: 'STEPS', value: r.count, time: r.startTime });
+      });
+
+      // Map Nhịp tim
+      rawData.HeartRate.forEach((r: any) => {
+        const bpm = r.samples[r.samples.length - 1]?.beatsPerMinute;
+        if (bpm) allRecords.push({ type: 'HEART_RATE', value: bpm, time: r.startTime });
+      });
+
+      // Map Calo
+      rawData.Calories.forEach((r: any) => {
+        allRecords.push({ type: 'CALORIES', value: r.energy.inKilocalories, time: r.startTime });
+      });
+
+      // Map Quãng đường
+      rawData.Distance.forEach((r: any) => {
+        allRecords.push({ type: 'DISTANCE', value: r.distance.inMeters, time: r.startTime });
+      });
+
+      // Map SpO2
+      rawData.Oxygen.forEach((r: any) => {
+        allRecords.push({ type: 'BLOOD_OXYGEN', value: r.percentage, time: r.time });
+      });
+
+      if (allRecords.length === 0) return;
+
+      //console.log(`📤 [Sync] Gửi ${allRecords.length} bản ghi lên server...`);
+
+      // CHÚ Ý: Backend Duy dùng const { data } = req.body
+      // Nên ta phải gửi object có key là "data"
+      const payload = { data: allRecords };
+
+      // Sử dụng axios/fetch thông qua api service
+      // Vì hàm syncHealthDataSmart trong api.ts đang bọc metrics, Duy nên dùng hàm syncMetrics 
+      // hoặc gọi trực tiếp fetch để khớp key "data"
+      const response: any = await api.syncMetrics(payload as any); 
+
+      if (response) {
+        //console.log(`✅ [Sync] Thành công! Đã lưu ${response.count} bản ghi.`);
+      }
+    } catch (error: any) {
+      //console.error("❌ [Sync] Lỗi:", error.message);
+    }
+  };
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      await initialize();
+      await requestPermission([
+        { accessType: 'read', recordType: 'Steps' },
+        { accessType: 'read', recordType: 'HeartRate' },
+        { accessType: 'read', recordType: 'OxygenSaturation' },
+        { accessType: 'read', recordType: 'Distance' },
+        { accessType: 'read', recordType: 'ActiveCaloriesBurned' },
+      ]);
+
+      const now = new Date();
+      const startTime = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+      const filter = { timeRangeFilter: { operator: 'between', startTime, endTime: now.toISOString() } };
+
+      const [steps, heartRate, oxygen, distance, calories] = await Promise.all([
+        readRecords('Steps', filter as any),
+        readRecords('HeartRate', filter as any),
+        readRecords('OxygenSaturation', filter as any),
+        readRecords('Distance', filter as any),
+        readRecords('ActiveCaloriesBurned', filter as any), 
+      ]);
+
+      const rawData = {
+        Steps: steps.records,
+        HeartRate: heartRate.records,
+        Oxygen: oxygen.records,
+        Distance: distance.records,
+        Calories: calories.records,
+      };
+
+      setDataGroups(rawData);
+      await syncToDatabase(rawData);
+    } catch (e) {
+      //console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchData(); }, []);
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.appBar}><Text style={styles.appBarTitle}>Đồng bộ Duy</Text></View>
+      <ScrollView contentContainerStyle={{ padding: 16 }}>
+        <Text style={styles.txt}>Dữ liệu hôm nay: {Object.values(dataGroups).flat().length} mục</Text>
+      </ScrollView>
+      <TouchableOpacity style={styles.btn} onPress={fetchData} disabled={loading}>
+        <Text style={styles.btnTxt}>{loading ? 'ĐANG CHẠY...' : 'ĐỒNG BỘ NGAY'}</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#f5f5f5' },
+  appBar: { height: 90, backgroundColor: '#1E3A8A', justifyContent: 'center', alignItems: 'center', paddingTop: 30 },
+  appBarTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  txt: { textAlign: 'center', color: '#666' },
+  btn: { position: 'absolute', bottom: 30, left: 20, right: 20, height: 50, backgroundColor: '#10B981', borderRadius: 25, justifyContent: 'center', alignItems: 'center' },
+  btnTxt: { color: '#fff', fontWeight: 'bold' }
 });
+

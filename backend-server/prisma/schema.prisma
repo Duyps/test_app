@@ -14,6 +14,7 @@ model User {
   full_name        String           @default("Người dùng vô danh") @db.VarChar(100)
   otp_expires_at   DateTime?
   reset_otp        String?          @db.VarChar(6)
+
   alert_logs       AlertLog[]
   devices          Device[]
   health_metrics   HealthMetric[]
@@ -36,17 +37,19 @@ model HealthProfile {
   updated_at   DateTime? @updatedAt
   blood_type   String?   @db.VarChar(10)
   phone_number String?   @db.VarChar(20)
+
   user         User      @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
 
   @@map("health_profile")
 }
 
 model Relative {
+  relative_id  String @id @default(dbgenerated("(gen_random_uuid())::character varying")) @db.VarChar(50)
   phone_num    String @db.VarChar(20)
   user_id      String @db.VarChar(50)
   contact_name String @db.VarChar(100)
   relationship String @db.VarChar(50)
-  relative_id  String @id @default(dbgenerated("(gen_random_uuid())::character varying")) @db.VarChar(50)
+
   user         User   @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
 
   @@map("relative")
@@ -58,6 +61,7 @@ model Device {
   provider       String   @db.VarChar(50)
   status         String?  @db.VarChar(20)
   last_sync_time DateTime @default(now())
+
   user           User?    @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
 
   @@map("device")
@@ -71,26 +75,43 @@ model WorkoutSession {
   max_heart_rate Int?
   av_heart_rate  Int?
   status         String?        @db.VarChar(20)
+
   alert_logs     AlertLog[]
   health_metrics HealthMetric[]
+
   user           User?          @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
 
   @@map("workout_session")
 }
 
 model HealthMetric {
-  health_id       String          @id @default(uuid()) @db.VarChar(50)
-  user_id         String?         @db.VarChar(50)
-  work_id         String?         @db.VarChar(50)
-  record_time     DateTime
-  heart_rate      Int?
-  steps           Int?
-  sleep_duration  Int?
-  stress_level    Int?
-  raw_data        Json?
-  user            User?           @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  health_id      String   @id @default(uuid()) @db.VarChar(50)
+  user_id        String   @db.VarChar(50)
+  work_id        String?  @db.VarChar(50) // Khóa ngoại kết nối với WorkoutSession
+
+  type           String?  @db.VarChar(20) 
+  record_time    DateTime
+
+  // ... các chỉ số khác giữ nguyên ...
+  heart_rate     Int?
+  steps          Int?
+  sleep_duration Int?
+  stress_level   Int?
+  blood_oxygen   Float?
+  calories       Float?
+  distance       Float?
+
+  raw_data       Json?
+  created_at     DateTime @default(now())
+
+  // Quan hệ với User
+  user           User     @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  // ✅ THÊM DÒNG NÀY: Để định nghĩa quan hệ ngược lại với WorkoutSession
   workout_session WorkoutSession? @relation(fields: [work_id], references: [work_id])
 
+  @@unique([user_id, record_time, type])
+  @@index([user_id, record_time])
   @@map("health_metric")
 }
 
@@ -98,10 +119,12 @@ model AlertLog {
   alert_id           String          @id @default(uuid()) @db.VarChar(50)
   user_id            String?         @db.VarChar(50)
   work_id            String?         @db.VarChar(50)
+
   type               String          @db.VarChar(50)
   trigger_heart_rate Int
   alert_time         DateTime
   is_sos_sent        Boolean?        @default(false)
+
   user               User?           @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
   workout_session    WorkoutSession? @relation(fields: [work_id], references: [work_id])
 

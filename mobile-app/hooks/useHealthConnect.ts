@@ -11,21 +11,16 @@ import {
   HealthConnectData,
   HealthConnectStatus,
 } from '../services/healthConnect';
-import { api } from '../services/api';
+import { api, SyncRecord } from '../services/api'; // Đảm bảo đã export SyncRecord từ api.ts
 
 interface UseHealthConnectReturn {
-  // Status
   status: HealthConnectStatus;
   isAvailable: boolean;
   hasPermission: boolean;
-  
-  // Data
   data: HealthConnectData | null;
   loading: boolean;
   error: string | null;
   lastSyncTime: Date | null;
-  
-  // Actions
   requestPermissions: () => Promise<boolean>;
   refreshData: () => Promise<void>;
   syncToServer: () => Promise<boolean>;
@@ -39,36 +34,27 @@ export function useHealthConnect(): UseHealthConnectReturn {
   const [error, setError] = useState<string | null>(null);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
 
-  // Khởi tạo khi mount
   useEffect(() => {
     const init = async () => {
       if (Platform.OS !== 'android') {
         setStatus('NOT_SUPPORTED');
         return;
       }
-
       const initStatus = await initHealthConnect();
       setStatus(initStatus);
     };
-
     init();
   }, []);
 
-  // Yêu cầu quyền
   const requestPermissions = useCallback(async (): Promise<boolean> => {
     if (status !== 'AVAILABLE') {
       setError('Health Connect không khả dụng');
       return false;
     }
-
     try {
       const granted = await requestHealthPermissions();
       setHasPermission(granted);
-      
-      if (!granted) {
-        setError('Quyền truy cập bị từ chối');
-      }
-      
+      if (!granted) setError('Quyền truy cập bị từ chối');
       return granted;
     } catch (err) {
       setError('Lỗi yêu cầu quyền');
@@ -76,18 +62,12 @@ export function useHealthConnect(): UseHealthConnectReturn {
     }
   }, [status]);
 
-  // Đọc dữ liệu
   const refreshData = useCallback(async (): Promise<void> => {
-    if (status !== 'AVAILABLE') {
-      setError('Health Connect không khả dụng');
-      return;
-    }
-
+    if (status !== 'AVAILABLE') return;
     setLoading(true);
     setError(null);
 
     try {
-      // Yêu cầu quyền nếu chưa có
       if (!hasPermission) {
         const granted = await requestHealthPermissions();
         if (!granted) {
@@ -98,26 +78,21 @@ export function useHealthConnect(): UseHealthConnectReturn {
         setHasPermission(true);
       }
 
-      // Đọc dữ liệu
       const healthData = await readAllHealthData();
-      
       if (healthData) {
         setData(healthData);
         setLastSyncTime(new Date());
-        console.log('✅ [useHealthConnect] Đã đọc dữ liệu từ Health Connect');
       } else {
         setError('Không có dữ liệu từ Health Connect');
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Lỗi không xác định';
-      setError(message);
-      console.error('❌ [useHealthConnect] Lỗi:', message);
+      setError(err instanceof Error ? err.message : 'Lỗi không xác định');
     } finally {
       setLoading(false);
     }
   }, [status, hasPermission]);
 
-  // Đồng bộ lên server
+  // --- PHẦN SỬA ĐỔI QUAN TRỌNG NHẤT ---
   const syncToServer = useCallback(async (): Promise<boolean> => {
     if (!data) {
       setError('Không có dữ liệu để đồng bộ');
@@ -126,34 +101,82 @@ export function useHealthConnect(): UseHealthConnectReturn {
 
     try {
       setLoading(true);
-      
-      // Chuyển đổi dữ liệu Health Connect sang format API
       const now = new Date().toISOString();
-      const metrics = [
-        {
-          metric_id: `hc_${Date.now()}`,
-          record_time: now,
-          heart_rate: data.heartRate.current || undefined,
-          steps: data.steps.today || undefined,
-          sleep_duration: data.sleep.duration ? Math.round(data.sleep.duration) : undefined,
-          calories: data.steps.calories || undefined,
-          distance: data.steps.distance || undefined,
-          oxygen_saturation: data.oxygen.current || undefined,
-        },
-      ];
+      
+      // Tạo mảng phẳng chứa các bản ghi riêng lẻ (Atom Records)
+      const syncRecords: SyncRecord[] = [];
 
-      // Gọi API sync metrics (không gửi device_id - backend cho phép sync từ Health Connect)
+      // 1. Nhịp tim
+      if (data.heartRate.current && data.heartRate.current > 0) {
+        syncRecords.push({ 
+          type: 'HEART_RATE', 
+          value: data.heartRate.current, 
+          time: now 
+        });
+      }
+
+      // 2. Bước chân
+      if (data.steps.today && data.steps.today > 0) {
+        syncRecords.push({ 
+          type: 'STEPS', 
+          value: data.steps.today, 
+          time: now 
+        });
+      }
+
+      // 3. Nồng độ Oxy
+      if (data.oxygen.current && data.oxygen.current > 0) {
+        syncRecords.push({ 
+          type: 'BLOOD_OXYGEN', 
+          value: data.oxygen.current, 
+          time: now 
+        });
+      }
+
+      // 4. Giấc ngủ (phút)
+      if (data.sleep.duration && data.sleep.duration > 0) {
+        syncRecords.push({ 
+          type: 'SLEEP', 
+          value: Math.round(data.sleep.duration), 
+          time: now 
+        });
+      }
+
+      // 5. Calories
+      if (data.steps.calories && data.steps.calories > 0) {
+        syncRecords.push({ 
+          type: 'CALORIES', 
+          value: data.steps.calories, 
+          time: now 
+        });
+      }
+
+      // 6. Quãng đường
+      if (data.steps.distance && data.steps.distance > 0) {
+        syncRecords.push({ 
+          type: 'DISTANCE', 
+          value: data.steps.distance, 
+          time: now 
+        });
+      }
+
+      // Nếu không có dữ liệu nào hợp lệ thì dừng
+      if (syncRecords.length === 0) {
+        setLoading(false);
+        return true;
+      }
+
+      // Gửi mảng lên Backend qua hàm syncMetrics (đã được sửa đổi ở api.ts để nhận { data: [...] })
       await api.syncMetrics({
-        metrics,
+        data: syncRecords,
       });
       
-      console.log('✅ [useHealthConnect] Đã sync dữ liệu lên server');
       setLastSyncTime(new Date());
       return true;
+
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Lỗi đồng bộ';
       setError(message);
-      console.error('❌ [useHealthConnect] Lỗi sync:', message);
       return false;
     } finally {
       setLoading(false);
