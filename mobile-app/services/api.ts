@@ -58,117 +58,40 @@ export interface ProfileResponse {
   updated_at: string;
 }
 
-export interface RelativeResponse {
-  id?: string;
-  phone_num: string;
-  contact_name: string;
-  relationship: string | null;
-  user_id: string;
-}
-
-export interface RelativePayload {
-  phone_num: string;
-  contact_name: string;
-  relationship?: string;
-}
-
-export interface DeviceResponse {
-  device_id: string;
-  provider: string;
-  status: string | null;
-  last_sync_time: string | null;
-  user_id: string;
-}
-
-// Auth Types
-export interface LoginPayload {
-  email: string;
-  password: string;
-}
-
 export interface LoginResponse {
   token: string;
   user: {
     user_id: string;
     email: string;
+    full_name?: string;
     name?: string;
   };
 }
 
-export interface RegisterPayload {
-  email: string;
-  password: string;
-  confirm_password?: string;
-  full_name?: string;
-}
-
-export interface RegisterResponse {
-  message: string;
-  user_id?: string;
-}
-
-export interface ForgotPasswordPayload {
-  email: string;
-}
-
-export interface ForgotPasswordResponse {
-  message: string;
-  otp_sent?: boolean;
-}
-
-export interface ResetPasswordPayload {
-  email: string;
-  otp: string;
-  new_password: string;
-}
-
-export interface ResetPasswordResponse {
-  message: string;
-  success: boolean;
-}
-
-// ✅ CẬP NHẬT TYPES CHO SYNC (Để khớp với Backend và sửa lỗi TS)
-export interface SyncRecord {
-  type: 'HEART_RATE' | 'STEPS' | 'BLOOD_OXYGEN' | 'SLEEP' | 'CALORIES' | 'DISTANCE';
-  value: number;
-  time: string;
-}
-
-export interface MetricRecord {
-  metric_id?: string;
+// ✅ CẬP NHẬT TYPES CHO ĐỒNG BỘ MỚI (Khớp Schema Prisma)
+export interface HealthRecord {
   record_time: string;
-  heart_rate?: number;
-  steps?: number;
-  sleep_duration?: number;
-  calories?: number;
-  distance?: number;
-  blood_oxygen?: number; // Đổi tên cho đồng bộ với Prisma
-  stress_level?: number;
-  device_id?: string;
+  heart_rate: number | null;
+  steps: number | null;
+  blood_oxygen: number | null;
+  calories: number | null;
+  distance: number | null;
+  sleep_duration: number | null;
 }
 
 export interface MetricsResponse {
-  metrics: MetricRecord[];
-  summary?: {
-    avg_heart_rate: number;
-    min_heart_rate: number;
-    max_heart_rate: number;
-    total_steps: number;
-    total_calories: number;
-    total_sleep: number;
-  };
+  status: string;
+  daily_summary: any[];
+  raw_data: HealthRecord[]; // Đây là mảng dữ liệu Duy cần để tính toán
 }
 
-// ✅ SỬA LỖI: Thêm trường 'data' vào payload sync
 export interface MetricsSyncPayload {
-  device_id?: string;
-  metrics?: MetricRecord[]; // Giữ lại để không lỗi code cũ (nếu có)
-  data: SyncRecord[];      // Thêm mới để khớp với Controller và Hook mới
+  data: HealthRecord[];
 }
 
 export interface MetricsSyncResponse {
-  status: string;         // Backend trả về "success" hoặc "error"
-  count: number;          // Backend trả về result.count
+  status: string;
+  count: number;
   message?: string;
 }
 
@@ -181,46 +104,11 @@ export interface HealthTip {
   icon?: string;
 }
 
-export interface HealthTipCategory {
-  id: string;
-  name: string;
-  description?: string;
-}
-
-export interface AlertLogResponse {
-  alert_id: string;
-  user_id: string;
-  work_id: string | null;
-  type: string;
-  trigger_heart_rate: number;
-  alert_time: string;
-  is_sos_sent: boolean;
-}
-
-// Legacy Types
-export interface HealthDataPayload {
-  user_id: string;
-  device_id: string;
-  metrics: Array<{
-    record_time: string;
-    heart_rate?: number;
-    steps?: number;
-    sleep_duration?: number;
-    stress_level?: number;
-  }>;
-}
-
-export interface SyncResponse {
-  message: string;
-  synced_records: number;
-}
-
 // ===========================================
 // TOKEN MANAGEMENT
 // ===========================================
 import { getToken } from './auth';
 
-// Cache token trong memory để dùng sync
 let cachedToken: string | null = null;
 
 export const initializeAuth = async (): Promise<boolean> => {
@@ -247,7 +135,6 @@ async function fetchAPI<T>(
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), API_CONFIG.TIMEOUT);
 
-  // Thêm token nếu có
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
     ...options.headers,
@@ -274,16 +161,10 @@ async function fetchAPI<T>(
     }
 
     const data = await response.json();
-    //console.log(`✅ [API] Response:`, data);
     return data;
   } catch (error) {
     clearTimeout(timeoutId);
-
     if (error instanceof Error) {
-      if (error.name === 'AbortError') {
-        console.error('⏱️ [API] Timeout - Server có thể đang khởi động...');
-        throw new Error('Yêu cầu đã hết thời gian chờ. Vui lòng thử lại.');
-      }
       console.error(`❌ [API] Error:`, error.message);
     }
     throw error;
@@ -295,55 +176,29 @@ async function fetchAPI<T>(
 // ===========================================
 
 export const api = {
-  // ==================
   // AUTH
-  // ==================
-  login: (payload: LoginPayload): Promise<LoginResponse> =>
+  login: (payload: any): Promise<LoginResponse> =>
     fetchAPI<LoginResponse>(ENDPOINTS.AUTH_LOGIN, {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
 
-  register: (payload: RegisterPayload): Promise<RegisterResponse> =>
-    fetchAPI<RegisterResponse>(ENDPOINTS.AUTH_REGISTER, {
+  register: (payload: any): Promise<any> =>
+    fetchAPI<any>(ENDPOINTS.AUTH_REGISTER, {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
 
-  forgotPassword: (payload: ForgotPasswordPayload): Promise<ForgotPasswordResponse> =>
-    fetchAPI<ForgotPasswordResponse>(ENDPOINTS.AUTH_FORGOT_PASSWORD, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
-
-  resetPassword: (payload: ResetPasswordPayload): Promise<ResetPasswordResponse> =>
-    fetchAPI<ResetPasswordResponse>(ENDPOINTS.AUTH_RESET_PASSWORD, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
-
-  googleAuth: (idToken: string): Promise<LoginResponse> =>
-    fetchAPI<LoginResponse>(ENDPOINTS.AUTH_GOOGLE, {
-      method: 'POST',
-      body: JSON.stringify({ id_token: idToken }),
-    }),
-
-  // Tìm hàm verifyRegisterOTP và sửa lại như sau:
   verifyRegisterOTP: (payload: { email: string; otp: string }): Promise<LoginResponse> =>
     fetchAPI<any>(ENDPOINTS.AUTH_VERIFY_OTP, { 
       method: 'POST',
       body: JSON.stringify(payload),
-    }).then(res => {
-      // Chuyển đổi cấu trúc từ { data: { access_token, user } } 
-      // sang { token, user } để khớp với Interface LoginResponse cũ của bạn
-      return {
+    }).then(res => ({
         token: res.data.access_token,
         user: res.data.user
-      };
-    }),
-  // ==================
+    })),
+
   // PROFILE
-  // ==================
   getProfile: (): Promise<ProfileResponse> =>
     fetchAPI<ProfileResponse>(ENDPOINTS.PROFILE),
 
@@ -353,23 +208,17 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
-  // ==================
-  // HEALTH METRICS (Dashboard & Sync)
-  // ==================
-
-  getMetrics: (params?: { startDate?: string; endDate?: string }): Promise<MetricsResponse> => {
+  // ✅ HEALTH METRICS (Dùng cho HomeScreen)
+  getMetrics: (params?: { days?: number }): Promise<MetricsResponse> => {
     let endpoint = ENDPOINTS.METRICS;
-    if (params) {
-      const queryParams = new URLSearchParams();
-      if (params.startDate) queryParams.append('start_date', params.startDate);
-      if (params.endDate) queryParams.append('end_date', params.endDate);
-      if (queryParams.toString()) endpoint += `?${queryParams.toString()}`;
+    if (params?.days) {
+        endpoint += `?days=${params.days}`;
     }
     return fetchAPI<MetricsResponse>(endpoint);
   },
 
   /**
-   * ✅ SỬA LỖI: Giữ nguyên tên hàm syncMetrics nhưng cập nhật body JSON
+   * ✅ ĐỒNG BỘ DỮ LIỆU SẠCH (Object gộp 15 phút)
    */
   syncMetrics: (payload: MetricsSyncPayload): Promise<MetricsSyncResponse> =>
     fetchAPI<MetricsSyncResponse>(ENDPOINTS.METRICS, {
@@ -377,135 +226,17 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  // ==================
-  // HEALTH DATA (Legacy - Fallback)
-  // ==================
-  getHealthData: async (): Promise<HealthDataResponse> => {
-    try {
-      const metricsResponse = await api.getMetrics();
-      if (metricsResponse.metrics && metricsResponse.metrics.length > 0) {
-        const latestMetric = metricsResponse.metrics[0];
-        const summary = metricsResponse.summary;
-
-        return {
-          heartRate: {
-            current: latestMetric.heart_rate || 0,
-            min: summary?.min_heart_rate || 0,
-            max: summary?.max_heart_rate || 0,
-            avg: summary?.avg_heart_rate || 0,
-            resting: 0,
-            lastMeasured: latestMetric.record_time || 'Chưa có dữ liệu',
-            device: latestMetric.device_id || 'Chưa kết nối',
-            trend: 'stable' as const,
-          },
-          sleep: {
-            duration: summary?.total_sleep ? summary.total_sleep / 60 : 0,
-            quality: 0,
-            deepSleep: 0,
-            lightSleep: 0,
-            remSleep: 0,
-            awake: 0,
-            bedTime: '--:--',
-            wakeTime: '--:--',
-            device: 'Chưa kết nối',
-          },
-          steps: {
-            current: summary?.total_steps || 0,
-            goal: 10000,
-            distance: 0,
-            calories: summary?.total_calories || 0,
-          },
-          water: {
-            current: 0,
-            goal: 2500,
-          },
-        };
-      }
-      throw new Error('No metrics data');
-    } catch {
-      return {
-        heartRate: {
-          current: 0, min: 0, max: 0, avg: 0, resting: 0,
-          lastMeasured: 'Chưa có dữ liệu', device: 'Chưa kết nối', trend: 'stable' as const,
-        },
-        sleep: {
-          duration: 0, quality: 0, deepSleep: 0, lightSleep: 0,
-          remSleep: 0, awake: 0, bedTime: '--:--', wakeTime: '--:--', device: 'Chưa kết nối',
-        },
-        steps: { current: 0, goal: 10000, distance: 0, calories: 0, },
-        water: { current: 0, goal: 2500, },
-      };
-    }
+  // Dữ liệu cũ để App không lỗi khi gọi các màn hình khác
+  getHealthData: async (): Promise<any> => {
+    return fetchAPI<any>(ENDPOINTS.METRICS);
   },
 
-  // ==================
-  // DEVICES
-  // ==================
-  getDevices: (): Promise<DeviceResponse[]> =>
-    fetchAPI<DeviceResponse[]>(ENDPOINTS.DEVICES),
-
-  addDevice: (data: { device_id: string; device_name?: string; provider: string }): Promise<DeviceResponse> =>
-    fetchAPI<DeviceResponse>(ENDPOINTS.DEVICES, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
-
-  deleteDevice: (deviceId: string): Promise<void> =>
-    fetchAPI<void>(`${ENDPOINTS.DEVICES}/${deviceId}`, {
-      method: 'DELETE',
-    }),
-
-  updateDeviceStatus: (deviceId: string, status: string): Promise<DeviceResponse> =>
-    fetchAPI<DeviceResponse>(`${ENDPOINTS.DEVICES}/${deviceId}/status`, {
-      method: 'PATCH',
-      body: JSON.stringify({ status }),
-    }),
-
-  // ==================
-  // RELATIVES
-  // ==================
-  getRelatives: (): Promise<RelativeResponse[]> =>
-    fetchAPI<RelativeResponse[]>(ENDPOINTS.RELATIVES),
-
-  addRelative: (data: RelativePayload): Promise<RelativeResponse> =>
-    fetchAPI<RelativeResponse>(ENDPOINTS.RELATIVES, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
-
-  updateRelative: (id: string, data: Partial<RelativePayload>): Promise<RelativeResponse> =>
-    fetchAPI<RelativeResponse>(`${ENDPOINTS.RELATIVES}/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(data),
-    }),
-
-  deleteRelative: (id: string): Promise<void> =>
-    fetchAPI<void>(`${ENDPOINTS.RELATIVES}/${id}`, {
-      method: 'DELETE',
-    }),
-
-  // ==================
-  // ALERTS
-  // ==================
-  getAlerts: (): Promise<{ status: string; message: string; data: AlertLogResponse[] }> =>
-    fetchAPI<{ status: string; message: string; data: AlertLogResponse[] }>(ENDPOINTS.ALERTS),
-
-  // ==================
   // HEALTH TIPS
-  // ==================
-  getHealthTips: (category?: string): Promise<HealthTip[]> => {
-    let endpoint = ENDPOINTS.HEALTH_TIPS;
-    if (category) {
-      endpoint += `?category=${encodeURIComponent(category)}`;
-    }
-    return fetchAPI<HealthTip[]>(endpoint);
-  },
+  getRandomHealthTip: (): Promise<{ data: HealthTip[] }> =>
+    fetchAPI<{ data: HealthTip[] }>(ENDPOINTS.HEALTH_TIPS_RANDOM),
 
-  getRandomHealthTip: (): Promise<HealthTip> =>
-    fetchAPI<HealthTip>(ENDPOINTS.HEALTH_TIPS_RANDOM),
-
-  getHealthTipCategories: (): Promise<string[]> =>
-    fetchAPI<string[]>(ENDPOINTS.HEALTH_TIPS_CATEGORIES),
+  getHealthTipCategories: (): Promise<{ data: any[] }> =>
+    fetchAPI<{ data: any[] }>(ENDPOINTS.HEALTH_TIPS_CATEGORIES),
 };
 
 export default api;

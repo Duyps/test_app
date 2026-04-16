@@ -110,7 +110,7 @@ export const getHealthMetrics = async (req, res) => {
         return res.status(200).json({
             status: "success",
             daily_summary: dailySummary,
-            //raw_data: metrics 
+            raw_data: metrics 
         });
     } catch (error) {
         console.error("❌ Lỗi lấy Metrics:", error.message);
