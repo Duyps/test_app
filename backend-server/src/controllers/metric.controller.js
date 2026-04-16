@@ -1,11 +1,11 @@
 import prisma from '../lib/prisma.js';
 
 /**
- * 1. ĐỒNG BỘ DỮ LIỆU THỰC TỪ APP
+ * 1. ĐỒNG BỘ DỮ LIỆU THỰC TỪ APP (Hỗ trợ vét cạn Stages và Heart Rate)
  */
 export const syncHealthData = async (req, res) => {
     try {
-        const { data } = req.body; 
+        const { data } = req.body;
         const currentUserId = req.user.user_id;
 
         if (!data || !Array.isArray(data)) {
@@ -22,10 +22,11 @@ export const syncHealthData = async (req, res) => {
                 calories: item.calories ? parseFloat(item.calories) : null,
                 distance: item.distance ? parseFloat(item.distance) : null,
                 sleep_duration: item.sleep_duration ? Math.round(item.sleep_duration) : null,
+                raw_data: item.raw_data || null, // Lưu stages: { sleep_stages: 5 }
             };
         });
 
-        // Sử dụng createMany với skipDuplicates dựa trên @unique([user_id, record_time])
+        // skipDuplicates: true sẽ bỏ qua nếu trùng [user_id, record_time] nhờ @@unique Duy đã tạo
         const result = await prisma.healthMetric.createMany({
             data: dataToInsert,
             skipDuplicates: true 
@@ -43,14 +44,21 @@ export const syncHealthData = async (req, res) => {
 };
 
 /**
- * 2. LẤY DỮ LIỆU CHO MOBILE (Gom nhóm theo Ngày để vẽ biểu đồ)
+ * 2. LẤY DỮ LIỆU CHO MOBILE (Hỗ trợ Ngày/Tuần/Tháng cho biểu đồ)
  */
 export const getHealthMetrics = async (req, res) => {
     try {
         const currentUserId = req.user.user_id;
-        const days = parseInt(req.query.days) || 30; 
-        const startDate = new Date();
-        startDate.setDate(startDate.getDate() - days);
+        const { range = 'day' } = req.query; // 'day' | 'week' | 'month'
+        
+        const now = new Date();
+        let startDate = new Date();
+
+        // Thiết lập khoảng thời gian lọc
+        if (range === 'day') startDate.setHours(0, 0, 0, 0);
+        else if (range === 'week') startDate.setDate(now.getDate() - 7);
+        else if (range === 'month') startDate.setMonth(now.getMonth() - 1);
+        else startDate.setDate(now.getDate() - 30); // Default 30 ngày
 
         const metrics = await prisma.healthMetric.findMany({
             where: {
@@ -60,7 +68,7 @@ export const getHealthMetrics = async (req, res) => {
             orderBy: { record_time: 'asc' }
         });
 
-        // Gom nhóm dữ liệu theo ngày (Chỉ dùng cho hiển thị biểu đồ)
+        // Gom nhóm dữ liệu theo ngày (Dùng cho biểu đồ Bar Chart Tuần/Tháng)
         const groups = metrics.reduce((acc, curr) => {
             const date = curr.record_time.toISOString().split('T')[0];
             if (!acc[date]) {
@@ -69,16 +77,23 @@ export const getHealthMetrics = async (req, res) => {
                     calories: 0, 
                     distance: 0, 
                     sleep_duration: 0,
+                    deep_sleep: 0, // Tính riêng thời gian ngủ sâu
                     hr_samples: [], 
                     spo2_samples: [] 
                 };
             }
             
-            // Cộng dồn chính xác từ dữ liệu thô đã lưu
             if (curr.steps) acc[date].steps += curr.steps;
             if (curr.calories) acc[date].calories += curr.calories;
             if (curr.distance) acc[date].distance += curr.distance;
-            if (curr.sleep_duration) acc[date].sleep_duration += curr.sleep_duration;
+            
+            if (curr.sleep_duration) {
+                acc[date].sleep_duration += curr.sleep_duration;
+                // Nếu là Stage 5 (Deep Sleep) thì cộng dồn vào deep_sleep
+                if (curr.raw_data && curr.raw_data.sleep_stages === 5) {
+                    acc[date].deep_sleep += curr.sleep_duration;
+                }
+            }
             
             if (curr.heart_rate) acc[date].hr_samples.push(curr.heart_rate);
             if (curr.blood_oxygen) acc[date].spo2_samples.push(curr.blood_oxygen);
@@ -94,6 +109,7 @@ export const getHealthMetrics = async (req, res) => {
                 calories: Math.round(day.calories),
                 distance: parseFloat(day.distance.toFixed(2)),
                 sleep_hours: parseFloat((day.sleep_duration / 60).toFixed(1)),
+                deep_sleep_hours: parseFloat((day.deep_sleep / 60).toFixed(1)),
                 avg_hr: day.hr_samples.length > 0 
                     ? Math.round(day.hr_samples.reduce((a, b) => a + b) / day.hr_samples.length) 
                     : 0,
@@ -103,10 +119,16 @@ export const getHealthMetrics = async (req, res) => {
             };
         });
 
+        // Cấu trúc response tối ưu cho cả biểu đồ Ngày (mịn) và Tuần/Tháng (gom nhóm)
         return res.status(200).json({
             status: "success",
+            view_range: range,
             daily_summary: dailySummary,
-            raw_data: metrics 
+            raw_data: metrics.map(m => ({
+                ...m,
+                // Trả ra stage để Mobile dễ vẽ Hypnogram
+                sleep_stage: m.raw_data?.sleep_stages || null 
+            }))
         });
     } catch (error) {
         console.error("❌ Lỗi lấy Metrics:", error.message);

@@ -21,3 +21,6 @@ ai-service/venv/
 ai-service/__pycache__/
 ai-service/*.pyc
 /generated/prisma
+
+.env
+.env.local

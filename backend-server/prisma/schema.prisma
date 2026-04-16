@@ -81,7 +81,7 @@ model WorkoutSession {
 
 model HealthMetric {
   health_id      String          @id @default(uuid()) @db.VarChar(50)
-  user_id        String?         @db.VarChar(50)
+  user_id        String          @db.VarChar(50) // Fix: Bỏ dấu ? để đảm bảo Unique hoạt động chính xác
   work_id        String?         @db.VarChar(50)
   record_time    DateTime
   heart_rate     Int?
@@ -96,9 +96,11 @@ model HealthMetric {
   // ---------------------------------------------------
 
   raw_data        Json?
-  user            User?           @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  user            User           @relation(fields: [user_id], references: [user_id], onDelete: Cascade) // Fix: Bỏ dấu ?
   workout_session WorkoutSession? @relation(fields: [work_id], references: [work_id])
 
+  // Chống trùng lặp dữ liệu: 1 người dùng không thể có 2 bản ghi tại cùng 1 thời điểm
+  @@unique([user_id, record_time])
   @@map("health_metric")
 }
 
