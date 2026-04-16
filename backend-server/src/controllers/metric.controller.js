@@ -1,8 +1,7 @@
 import prisma from '../lib/prisma.js';
 
 /**
- * 1. ĐỒNG BỘ DỮ LIỆU THỰC TỪ APP (Health Connect)
- * Cập nhật: Logic mới bóc tách dữ liệu đã gộp từ App
+ * 1. ĐỒNG BỘ DỮ LIỆU THỰC TỪ APP
  */
 export const syncHealthData = async (req, res) => {
     try {
@@ -13,28 +12,24 @@ export const syncHealthData = async (req, res) => {
             return res.status(400).json({ status: "error", message: "Dữ liệu không hợp lệ." });
         }
 
-        // Mapping lại dữ liệu để khớp với các cột trong Database
         const dataToInsert = data.map((item) => {
             return {
                 user_id: currentUserId,
-                record_time: new Date(item.record_time), // Chuyển chuỗi ISO sang đối tượng Date
+                record_time: new Date(item.record_time),
                 heart_rate: item.heart_rate ? Math.round(item.heart_rate) : null,
                 steps: item.steps ? Math.round(item.steps) : null,
                 blood_oxygen: item.blood_oxygen ? parseFloat(item.blood_oxygen) : null,
                 calories: item.calories ? parseFloat(item.calories) : null,
                 distance: item.distance ? parseFloat(item.distance) : null,
                 sleep_duration: item.sleep_duration ? Math.round(item.sleep_duration) : null,
-                // raw_data: item // Duy có thể giữ lại hoặc bỏ để nhẹ DB
             };
         });
 
-        // Sử dụng createMany để lưu hàng loạt
+        // Sử dụng createMany với skipDuplicates dựa trên @unique([user_id, record_time])
         const result = await prisma.healthMetric.createMany({
             data: dataToInsert,
-            skipDuplicates: true // Nếu trùng user_id và record_time thì không lưu đè
+            skipDuplicates: true 
         });
-
-        console.log(`✅ [Sync] Đã lưu thành công ${result.count} bản ghi cho User: ${currentUserId}`);
 
         return res.status(201).json({ 
             status: "success", 
@@ -48,12 +43,12 @@ export const syncHealthData = async (req, res) => {
 };
 
 /**
- * 2. LẤY DỮ LIỆU CHO MOBILE (Gom nhóm và tính toán cho Biểu đồ)
+ * 2. LẤY DỮ LIỆU CHO MOBILE (Gom nhóm theo Ngày để vẽ biểu đồ)
  */
 export const getHealthMetrics = async (req, res) => {
     try {
         const currentUserId = req.user.user_id;
-        const days = parseInt(req.query.days) || 30; // Mặc định lấy 30 ngày cho biểu đồ
+        const days = parseInt(req.query.days) || 30; 
         const startDate = new Date();
         startDate.setDate(startDate.getDate() - days);
 
@@ -65,7 +60,7 @@ export const getHealthMetrics = async (req, res) => {
             orderBy: { record_time: 'asc' }
         });
 
-        // Gom nhóm dữ liệu theo ngày để Frontend vẽ biểu đồ tổng quan
+        // Gom nhóm dữ liệu theo ngày (Chỉ dùng cho hiển thị biểu đồ)
         const groups = metrics.reduce((acc, curr) => {
             const date = curr.record_time.toISOString().split('T')[0];
             if (!acc[date]) {
@@ -79,6 +74,7 @@ export const getHealthMetrics = async (req, res) => {
                 };
             }
             
+            // Cộng dồn chính xác từ dữ liệu thô đã lưu
             if (curr.steps) acc[date].steps += curr.steps;
             if (curr.calories) acc[date].calories += curr.calories;
             if (curr.distance) acc[date].distance += curr.distance;

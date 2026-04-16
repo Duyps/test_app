@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   ScrollView,
   TouchableOpacity,
   StatusBar,
+  ActivityIndicator,
 } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -33,12 +34,25 @@ const WORKOUT_TYPES: WorkoutType[] = [
 
 export default function LiveTrackingScreen() {
   const [selectedWorkout, setSelectedWorkout] = useState<WorkoutType | null>(null);
-  const { data: healthData } = useHealthData();
+  
+  // 1. Kiểm tra loading từ hook
+  const { data: healthData, loading } = useHealthData();
 
-  // Tính từ dữ liệu thực
-  const todayCalories = healthData.steps.calories || 0;
-  const todayMinutes = healthData.steps.current > 0 ? Math.round(healthData.steps.current / 100) : 0;
-  const todaySessions = healthData.steps.current > 0 ? 1 : 0;
+  // 2. Sử dụng useMemo để tính toán an toàn (Safe Computing)
+  const stats = useMemo(() => {
+    // Nếu chưa có data, trả về giá trị mặc định ngay để tránh lỗi property of null
+    if (!healthData || !healthData.steps) {
+      return { calories: 0, minutes: 0, sessions: 0 };
+    }
+
+    const currentSteps = healthData.steps.current || 0;
+    
+    return {
+      calories: healthData.steps.calories || 0,
+      minutes: currentSteps > 0 ? Math.round(currentSteps / 100) : 0,
+      sessions: currentSteps > 0 ? 1 : 0
+    };
+  }, [healthData]);
 
   const handleStartWorkout = () => {
     if (!selectedWorkout) return;
@@ -54,6 +68,16 @@ export default function LiveTrackingScreen() {
       },
     });
   };
+
+  // 3. Hiển thị Loading khi dữ liệu đang tải
+  if (loading && !healthData) {
+    return (
+      <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={Colors.primary.main} />
+        <Text style={{ marginTop: 10, color: Colors.neutral.textSecondary }}>Đang tải dữ liệu tập luyện...</Text>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -72,23 +96,23 @@ export default function LiveTrackingScreen() {
         contentContainerStyle={styles.contentContainer}
         showsVerticalScrollIndicator={false}
       >
-        {/* Current Stats Summary */}
+        {/* Current Stats Summary - Dùng dữ liệu từ biến stats an toàn */}
         <View style={styles.statsCard}>
           <View style={styles.statItem}>
             <Ionicons name="flame" size={24} color={Colors.health.calories} />
-            <Text style={styles.statValue}>{todayCalories}</Text>
+            <Text style={styles.statValue}>{stats.calories}</Text>
             <Text style={styles.statLabel}>kcal hôm nay</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
             <Ionicons name="time" size={24} color={Colors.primary.main} />
-            <Text style={styles.statValue}>{todayMinutes}</Text>
+            <Text style={styles.statValue}>{stats.minutes}</Text>
             <Text style={styles.statLabel}>phút tập</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
             <Ionicons name="trophy" size={24} color={Colors.secondary.orange} />
-            <Text style={styles.statValue}>{todaySessions}</Text>
+            <Text style={styles.statValue}>{stats.sessions}</Text>
             <Text style={styles.statLabel}>buổi tập</Text>
           </View>
         </View>
