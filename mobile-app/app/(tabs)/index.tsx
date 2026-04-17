@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+// Đảm bảo import Text rõ ràng từ react-native để tránh lỗi JSX
 import { View, StyleSheet, ScrollView, RefreshControl, Text } from 'react-native';
 
 // Constants & Components
-import { Colors, Spacing, BorderRadius, Shadows } from '../../constants/Colors';
+import { Colors, Spacing, Shadows } from '../../constants/Colors';
 import Header from '../../components/home/Header';
 import HealthScoreCard from '../../components/home/HealthScoreCard';
 import SleepSection from '../../components/home/SleepSection';
 import HealthTipCard from '../../components/home/HealthTips';
 import HeartRateSection from '../../components/home/HeartRateSection';
+import OxygenSection from '../../components/home/OxygenSection';
 
 // Hooks & Services
 import { useHealthData } from '../../hooks/useHealthData';
@@ -22,110 +24,145 @@ export default function HomeScreen() {
   const [userName, setUserName] = useState<string>('');
   
   const { syncHealthData, loading: isSyncing } = useHealthConnect() as any;
-  const { data: serverResponse, loading: isDataLoading, refresh: refreshFromServer } = useHealthData(timeRange) as any;
+  const { data: serverResponse, loading: isDataLoading, refresh } = useHealthData(timeRange) as any;
   const { randomTip } = useHealthTips();
 
   const rawData = useMemo(() => serverResponse?.raw_data || [], [serverResponse]);
   const dailySummary = useMemo(() => serverResponse?.daily_summary || [], [serverResponse]);
 
   const processedData = useMemo(() => {
-    // --- KHÔNG CÓ DỮ LIỆU ---
     if (rawData.length === 0 && dailySummary.length === 0) {
       return {
-        heartRate: { current: 0, avg: 0, history: [] },
-        sleep: { duration: '0.0', stages: [] },
-        steps: 0, calories: 0,
+        score: 0,
+        heartRate: { current: 0, avg: 0, history: [] as number[] },
+        sleep: { duration: '0.0', stages: [] as any[] },
+        oxygen: 0,
+        steps: 0,
+        calories: 0,
       };
     }
 
-    // --- TAB HÔM NAY (Lấy ngày có dữ liệu mới nhất) ---
+    // --- XỬ LÝ TAB NGÀY ---
     if (timeRange === 'day') {
-      // Tìm ngày mới nhất có trong mảng rawData
-      const latestDateStr = rawData.length > 0 
-        ? new Date(rawData[rawData.length - 1].record_time).toDateString()
-        : new Date().toDateString();
-
-      const targetRecords = rawData.filter((r: any) => 
-        new Date(r.record_time).toDateString() === latestDateStr
-      );
-
-      const hrValues = targetRecords.map((r: any) => r.heart_rate).filter((v: any) => v !== null);
+      const availableDates = Array.from(new Set(rawData.map((r: any) => new Date(r.record_time).toDateString()))).reverse();
       
-      const stats = { deep: 0, rem: 0, light: 0, total: 0 };
-      targetRecords.forEach((r: any) => {
-        if (r.sleep_duration > 0) {
-          const stage = r.sleep_stage || r.raw_data?.sleep_stages;
-          stats.total += r.sleep_duration;
-          if (stage === 5) stats.deep += r.sleep_duration;
-          else if (stage === 6) stats.rem += r.sleep_duration;
-          else stats.light += r.sleep_duration;
+      // Fix lỗi unknown bằng cách gán kiểu string rõ ràng
+      let targetDateStr: string = new Date().toDateString();
+      
+      for (const dStr of availableDates) {
+        const hasMainData = rawData.some((r: any) => 
+          new Date(r.record_time).toDateString() === (dStr as string) && (r.heart_rate > 0 || r.steps > 0 || r.blood_oxygen > 0)
+        );
+        if (hasMainData) { 
+          targetDateStr = dStr as string; 
+          break; 
         }
+      }
+
+      const targetRecords = rawData.filter((r: any) => new Date(r.record_time).toDateString() === targetDateStr);
+      const hrValues = targetRecords.map((r: any) => r.heart_rate).filter((v: any) => v != null && v > 0);
+      const oxygenValues = targetRecords.map((r: any) => r.blood_oxygen).filter((v: any) => v != null && v > 0);
+      const sleepRecs = targetRecords.filter((r: any) => r.sleep_duration > 0);
+      
+      let deep = 0, rem = 0, light = 0, totalSleep = 0;
+      sleepRecs.forEach((r: any) => {
+        const stage = r.sleep_stage || r.raw_data?.sleep_stages;
+        totalSleep += (r.sleep_duration || 0);
+        if (stage === 5) deep += r.sleep_duration;
+        else if (stage === 6) rem += r.sleep_duration;
+        else light += r.sleep_duration;
       });
 
+      const totalSteps = targetRecords.reduce((s: number, r: any) => s + (r.steps || 0), 0);
+
       return {
+        score: Math.min(100, 65 + (totalSteps / 200) + (totalSleep / 120)),
         heartRate: {
           current: hrValues.length ? hrValues[hrValues.length - 1] : 0,
           avg: hrValues.length ? Math.round(hrValues.reduce((a: number, b: number) => a + b, 0) / hrValues.length) : 0,
-          history: hrValues.slice(-30), // Lấy lịch sử nhịp tim để vẽ chart
+          history: hrValues.slice(-30)
         },
+        oxygen: oxygenValues.length ? oxygenValues[oxygenValues.length - 1] : 0,
         sleep: {
-          duration: (stats.total / 60).toFixed(1),
+          duration: (totalSleep / 60).toFixed(1),
           stages: [
-            { label: 'Sâu', minutes: stats.deep, percent: stats.total ? (stats.deep/stats.total)*100 : 0, color: '#5B21B6' },
-            { label: 'REM', minutes: stats.rem, percent: stats.total ? (stats.rem/stats.total)*100 : 0, color: '#A78BFA' },
-            { label: 'Nhẹ', minutes: stats.light, percent: stats.total ? (stats.light/stats.total)*100 : 0, color: '#8B5CF6' },
-          ],
+            { label: 'Sâu', minutes: deep, percent: totalSleep ? (deep/totalSleep)*100 : 0, color: '#5B21B6' },
+            { label: 'REM', minutes: rem, percent: totalSleep ? (rem/totalSleep)*100 : 0, color: '#A78BFA' },
+            { label: 'Nhẹ', minutes: light, percent: totalSleep ? (light/totalSleep)*100 : 0, color: '#8B5CF6' },
+          ]
         },
-        steps: targetRecords.reduce((sum: number, r: any) => sum + (r.steps || 0), 0),
-        calories: Math.round(targetRecords.reduce((sum: number, r: any) => sum + (r.calories || 0), 0)),
+        steps: Math.round(totalSteps),
+        calories: Math.round(targetRecords.reduce((s: number, r: any) => s + (r.calories || 0), 0)),
       };
     }
 
-    // --- TAB TUẦN / THÁNG (Dùng dailySummary) ---
+    // --- TAB TUẦN / THÁNG ---
+    const totalSteps = dailySummary.reduce((s: number, d: any) => s + (d.steps || 0), 0);
+    const totalCals = dailySummary.reduce((s: number, d: any) => s + (d.calories || 0), 0);
     const hrHistory = dailySummary.map((d: any) => d.avg_hr).filter((v: any) => v > 0);
-    const totalSteps = dailySummary.reduce((sum: number, d: any) => sum + (d.steps || 0), 0);
-    const totalCalories = dailySummary.reduce((sum: number, d: any) => sum + (d.calories || 0), 0);
+    const oxyHistory = dailySummary.map((d: any) => d.avg_spo2 || 0).filter((v: any) => v > 0);
+    const totalSleepHrs = dailySummary.reduce((s: number, d: any) => s + (d.sleep_hours || 0), 0);
+    const sumDeep = dailySummary.reduce((s: number, d: any) => s + (d.deep_sleep_hours || 0), 0);
+    const sumRem = dailySummary.reduce((s: number, d: any) => s + (d.rem_sleep_hours || 0), 0);
 
     return {
+      score: Math.min(100, 55 + (totalSteps / (timeRange === 'week' ? 1000 : 5000))),
       heartRate: {
         current: hrHistory.length ? hrHistory[hrHistory.length - 1] : 0,
-        avg: hrHistory.length ? Math.round(hrHistory.reduce((a:number, b:number) => a+b, 0) / hrHistory.length) : 0,
-        history: hrHistory,
+        avg: hrHistory.length ? Math.round(hrHistory.reduce((a: number, b: number) => a + b, 0) / hrHistory.length) : 0,
+        history: hrHistory
       },
+      oxygen: oxyHistory.length ? Math.round(oxyHistory.reduce((a: number, b: number) => a + b, 0) / oxyHistory.length) : 0,
       sleep: {
-        duration: dailySummary.reduce((sum: number, d: any) => sum + (d.sleep_hours || 0), 0).toFixed(1),
-        stages: [], 
+        duration: totalSleepHrs.toFixed(1),
+        stages: [
+          { label: 'Sâu', minutes: sumDeep * 60, percent: totalSleepHrs ? (sumDeep/totalSleepHrs)*100 : 0, color: '#5B21B6' },
+          { label: 'REM', minutes: sumRem * 60, percent: totalSleepHrs ? (sumRem/totalSleepHrs)*100 : 0, color: '#A78BFA' },
+          { label: 'Nhẹ', minutes: (totalSleepHrs - sumDeep - sumRem) * 60, percent: totalSleepHrs ? ((totalSleepHrs - sumDeep - sumRem)/totalSleepHrs)*100 : 0, color: '#8B5CF6' },
+        ]
       },
-      steps: totalSteps,
-      calories: totalCalories,
+      steps: Math.round(totalSteps),
+      calories: Math.round(totalCals)
     };
   }, [rawData, dailySummary, timeRange]);
 
   const onRefresh = useCallback(async () => {
-    await syncHealthData(30); 
-    if (refreshFromServer) refreshFromServer();
-  }, [syncHealthData, refreshFromServer]);
+    await syncHealthData(30);
+    setTimeout(() => refresh(), 800);
+  }, [syncHealthData, refresh]);
 
   useEffect(() => {
-    getUserData().then(user => setUserName((user as any)?.full_name || 'Duy'));
+    getUserData().then((u: any) => setUserName(u?.full_name || 'Duy'));
     onRefresh();
   }, []);
 
   return (
     <View style={styles.container}>
-      <Header userName={userName} timeRange={timeRange} setTimeRange={setTimeRange} isSyncing={isSyncing} onRefresh={onRefresh} />
+      <Header 
+        userName={userName} 
+        timeRange={timeRange} 
+        setTimeRange={setTimeRange} 
+        isSyncing={isSyncing} 
+        onRefresh={onRefresh} 
+      />
       <ScrollView
         style={styles.content}
         contentContainerStyle={styles.contentContainer}
-        refreshControl={<RefreshControl refreshing={isDataLoading} onRefresh={onRefresh} colors={[Colors.primary.main]} />}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={isDataLoading} onRefresh={refresh} colors={[Colors.primary.main]} />}
       >
-        <HealthScoreCard score={85} />
+        <HealthScoreCard score={Math.round(processedData.score)} />
+
         <HeartRateSection 
           current={processedData.heartRate.current}
           avg={processedData.heartRate.avg}
           history={processedData.heartRate.history}
         />
+
+        <OxygenSection percent={processedData.oxygen} />
+
         <SleepSection duration={processedData.sleep.duration} stages={processedData.sleep.stages} />
+
         <View style={styles.smallCardsRow}>
           <View style={styles.smallCard}>
             <Text style={styles.smallCardValue}>{processedData.steps.toLocaleString()}</Text>
@@ -136,7 +173,8 @@ export default function HomeScreen() {
             <Text style={styles.smallCardLabel}>Kcal tiêu thụ</Text>
           </View>
         </View>
-        <HealthTipCard tipContent={randomTip?.content} />
+
+        <HealthTipCard tipContent={randomTip?.content || "Duy trì lối sống lành mạnh cùng HealthGuard nhé!"} />
       </ScrollView>
     </View>
   );
@@ -144,10 +182,10 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.primary.main },
-  content: { flex: 1, backgroundColor: '#F8FAFC', borderTopLeftRadius: 30, borderTopRightRadius: 30, marginTop: -Spacing.md },
+  content: { flex: 1, backgroundColor: '#F8FAFC', borderTopLeftRadius: 32, borderTopRightRadius: 32, marginTop: -Spacing.md },
   contentContainer: { padding: 20, paddingBottom: 40 },
   smallCardsRow: { flexDirection: 'row', gap: 15, marginBottom: 15 },
-  smallCard: { flex: 1, backgroundColor: '#FFF', padding: 15, borderRadius: 20, alignItems: 'center', ...Shadows.sm },
-  smallCardValue: { fontSize: 20, fontWeight: 'bold', color: '#1E293B' },
-  smallCardLabel: { fontSize: 12, color: '#64748B' },
+  smallCard: { flex: 1, backgroundColor: '#FFF', padding: 18, borderRadius: 24, alignItems: 'center', ...Shadows.sm },
+  smallCardValue: { fontSize: 22, fontWeight: 'bold', color: '#1E293B' },
+  smallCardLabel: { fontSize: 12, color: '#64748B', marginTop: 4 },
 });

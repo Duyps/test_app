@@ -10,8 +10,9 @@ interface HealthScoreCardProps {
 const HealthScoreCard: React.FC<HealthScoreCardProps> = ({ score }) => {
   // Logic xác định trạng thái dựa trên score
   const getStatus = (val: number) => {
-    if (val >= 80) return { text: 'Tốt', color: Colors.status.success };
-    if (val >= 50) return { text: 'Trung bình', color: Colors.secondary.orange };
+    if (val >= 75) return { text: 'Tuyệt vời', color: Colors.status.success }; // Hạ từ 80 xuống 75
+    if (val >= 60) return { text: 'Ổn định', color: '#0EA5E9' }; // Màu xanh dương cho mức khá
+    if (val >= 40) return { text: 'Trung bình', color: Colors.secondary.orange };
     return { text: 'Cần chú ý', color: Colors.status.error };
   };
 
