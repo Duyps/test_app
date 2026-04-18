@@ -38,7 +38,8 @@
         "android.permission.health.READ_SLEEP",
         "android.permission.health.READ_OXYGEN_SATURATION",
         "android.permission.health.READ_ACTIVE_CALORIES_BURNED",
-        "android.permission.health.READ_TOTAL_CALORIES_BURNED"
+        "android.permission.health.READ_TOTAL_CALORIES_BURNED",
+        "android.permission.health.READ_BASAL_METABOLIC_RATE"
       ],
       "package": "com.namhu147.mobileapp"
     },
@@ -67,7 +68,8 @@
             "android.permission.health.READ_SLEEP",
             "android.permission.health.READ_OXYGEN_SATURATION",
             "android.permission.health.READ_ACTIVE_CALORIES_BURNED",
-            "android.permission.health.READ_TOTAL_CALORIES_BURNED"
+            "android.permission.health.READ_TOTAL_CALORIES_BURNED",
+            "android.permission.health.READ_BASAL_METABOLIC_RATE"
           ]
         }
       ],

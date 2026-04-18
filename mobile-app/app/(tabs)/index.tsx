@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-// Đảm bảo import Text rõ ràng từ react-native để tránh lỗi JSX
 import { View, StyleSheet, ScrollView, RefreshControl, Text } from 'react-native';
 
 // Constants & Components
@@ -10,6 +9,8 @@ import SleepSection from '../../components/home/SleepSection';
 import HealthTipCard from '../../components/home/HealthTips';
 import HeartRateSection from '../../components/home/HeartRateSection';
 import OxygenSection from '../../components/home/OxygenSection';
+import StepsSection from '../../components/home/StepsSection'; 
+import CaloriesSection from '../../components/home/CaloriesSection'; 
 
 // Hooks & Services
 import { useHealthData } from '../../hooks/useHealthData';
@@ -31,22 +32,23 @@ export default function HomeScreen() {
   const dailySummary = useMemo(() => serverResponse?.daily_summary || [], [serverResponse]);
 
   const processedData = useMemo(() => {
+    // Giá trị mặc định ban đầu
+    const defaultData = {
+      score: 0,
+      heartRate: { current: 0, avg: 0, history: [] as number[] },
+      oxygen: 0,
+      sleep: { duration: '0.0', stages: [] as any[] },
+      steps: 0,
+      calories: 0,
+    };
+
     if (rawData.length === 0 && dailySummary.length === 0) {
-      return {
-        score: 0,
-        heartRate: { current: 0, avg: 0, history: [] as number[] },
-        sleep: { duration: '0.0', stages: [] as any[] },
-        oxygen: 0,
-        steps: 0,
-        calories: 0,
-      };
+      return defaultData;
     }
 
     // --- XỬ LÝ TAB NGÀY ---
     if (timeRange === 'day') {
       const availableDates = Array.from(new Set(rawData.map((r: any) => new Date(r.record_time).toDateString()))).reverse();
-      
-      // Fix lỗi unknown bằng cách gán kiểu string rõ ràng
       let targetDateStr: string = new Date().toDateString();
       
       for (const dStr of availableDates) {
@@ -74,6 +76,7 @@ export default function HomeScreen() {
       });
 
       const totalSteps = targetRecords.reduce((s: number, r: any) => s + (r.steps || 0), 0);
+      const totalCalories = targetRecords.reduce((s: number, r: any) => s + (r.calories || 0), 0);
 
       return {
         score: Math.min(100, 65 + (totalSteps / 200) + (totalSleep / 120)),
@@ -92,7 +95,7 @@ export default function HomeScreen() {
           ]
         },
         steps: Math.round(totalSteps),
-        calories: Math.round(targetRecords.reduce((s: number, r: any) => s + (r.calories || 0), 0)),
+        calories: Math.round(totalCalories),
       };
     }
 
@@ -151,27 +154,45 @@ export default function HomeScreen() {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={isDataLoading} onRefresh={refresh} colors={[Colors.primary.main]} />}
       >
-        <HealthScoreCard score={Math.round(processedData.score)} />
+        <HealthScoreCard score={Math.round(processedData?.score ?? 0)} />
 
         <HeartRateSection 
-          current={processedData.heartRate.current}
-          avg={processedData.heartRate.avg}
-          history={processedData.heartRate.history}
+          current={processedData.heartRate.current ?? 0}
+          avg={processedData.heartRate.avg ?? 0}
+          history={processedData.heartRate.history ?? []}
+          timeRange={timeRange}
+          // Thêm kiểu : any (hoặc kiểu cụ thể) cho d ở đây
+          rawData={timeRange === 'day' 
+            ? rawData 
+            : dailySummary.map((d: any) => ({ heart_rate: d.avg_hr }))
+          } 
         />
 
-        <OxygenSection percent={processedData.oxygen} />
+        <OxygenSection 
+          percent={processedData?.oxygen ?? 0}
+          timeRange={timeRange}
+          // Nếu là tab Day: dùng rawData. 
+          // Nếu là Week/Month: dùng dailySummary (nhớ map min_spo2/max_spo2 từ backend nếu có)
+          rawData={timeRange === 'day' 
+            ? rawData 
+            : dailySummary.map((d: any) => ({ 
+                blood_oxygen: d.avg_spo2, 
+                min_spo2: d.min_spo2 || (d.avg_spo2 - 2), // Mock nếu backend chưa có min/max
+                max_spo2: d.max_spo2 || (d.avg_spo2 + 1) 
+              }))
+          }
+        />
 
-        <SleepSection duration={processedData.sleep.duration} stages={processedData.sleep.stages} />
+        <SleepSection 
+          duration={processedData?.sleep?.duration ?? '0.0'} 
+          stages={processedData?.sleep?.stages ?? []} 
+          timeRange={timeRange}
+          dailySummary={dailySummary} // Dữ liệu này lấy từ serverResponse.daily_summary
+        />
 
         <View style={styles.smallCardsRow}>
-          <View style={styles.smallCard}>
-            <Text style={styles.smallCardValue}>{processedData.steps.toLocaleString()}</Text>
-            <Text style={styles.smallCardLabel}>Bước chân</Text>
-          </View>
-          <View style={styles.smallCard}>
-            <Text style={styles.smallCardValue}>{processedData.calories}</Text>
-            <Text style={styles.smallCardLabel}>Kcal tiêu thụ</Text>
-          </View>
+          <StepsSection steps={processedData?.steps ?? 0} />
+          <CaloriesSection calories={processedData?.calories ?? 0} timeRange={timeRange} />
         </View>
 
         <HealthTipCard tipContent={randomTip?.content || "Duy trì lối sống lành mạnh cùng HealthGuard nhé!"} />
@@ -185,7 +206,4 @@ const styles = StyleSheet.create({
   content: { flex: 1, backgroundColor: '#F8FAFC', borderTopLeftRadius: 32, borderTopRightRadius: 32, marginTop: -Spacing.md },
   contentContainer: { padding: 20, paddingBottom: 40 },
   smallCardsRow: { flexDirection: 'row', gap: 15, marginBottom: 15 },
-  smallCard: { flex: 1, backgroundColor: '#FFF', padding: 18, borderRadius: 24, alignItems: 'center', ...Shadows.sm },
-  smallCardValue: { fontSize: 22, fontWeight: 'bold', color: '#1E293B' },
-  smallCardLabel: { fontSize: 12, color: '#64748B', marginTop: 4 },
 });

@@ -87,6 +87,7 @@ export interface MetricsResponse {
 
 export interface MetricsSyncPayload {
   data: HealthRecord[];
+  device_id?: string; 
 }
 
 export interface MetricsSyncResponse {
@@ -102,6 +103,15 @@ export interface HealthTip {
   content: string;
   category: string;
   icon?: string;
+}
+
+export interface Device {
+  id: string;
+  name: string;
+  type: string;
+  device_id: string; // ID định danh phần cứng
+  last_sync?: string;
+  status?: 'active' | 'inactive';
 }
 
 // ===========================================
@@ -248,6 +258,25 @@ export const api = {
 
   getHealthTipCategories: (): Promise<{ data: any[] }> =>
     fetchAPI<{ data: any[] }>(ENDPOINTS.HEALTH_TIPS_CATEGORIES),
+
+  //DEVICES
+  getDevices: (): Promise<{ data: Device[] }> =>
+    fetchAPI<{ data: Device[] }>(ENDPOINTS.DEVICES || '/devices'),
+
+  addDevice: (payload: { 
+    device_id: string; 
+    device_name: string; // Đảm bảo field này tồn tại
+    provider: string; 
+  }): Promise<Device> =>
+    fetchAPI<Device>(ENDPOINTS.DEVICES || '/devices', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  deleteDevice: (deviceId: string): Promise<any> =>
+    fetchAPI<any>(`${ENDPOINTS.DEVICES || '/devices'}/${deviceId}`, {
+      method: 'DELETE',
+    }),
 };
 
 export default api;

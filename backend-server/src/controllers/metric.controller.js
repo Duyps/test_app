@@ -25,7 +25,6 @@ export const syncHealthData = async (req, res) => {
                         },
                     },
                     update: {
-                        // Sửa lỗi ghi đè: Chỉ cập nhật nếu có dữ liệu mới
                         heart_rate: item.heart_rate ?? undefined,
                         steps: item.steps ?? undefined,
                         sleep_duration: item.sleep_duration ?? undefined,
@@ -52,7 +51,6 @@ export const syncHealthData = async (req, res) => {
 
         return res.status(201).json({ status: "success", count: totalProcessed });
     } catch (error) {
-        //console.error("❌ [Sync Error]:", error.message);
         return res.status(500).json({ status: "error", message: error.message });
     }
 };
@@ -65,7 +63,6 @@ export const getHealthMetrics = async (req, res) => {
         const now = new Date();
         let startDate = new Date();
 
-        // Mở rộng khoảng thời gian lấy dữ liệu để tab "Hôm nay" luôn có data ngày gần nhất
         if (range === 'day') startDate.setDate(now.getDate() - 1); 
         else if (range === 'week') startDate.setDate(now.getDate() - 7);
         else if (range === 'month') startDate.setMonth(now.getMonth() - 1);
@@ -78,10 +75,9 @@ export const getHealthMetrics = async (req, res) => {
             orderBy: { record_time: 'asc' }
         });
 
-        // Hàm xử lý ngày chuẩn theo múi giờ địa phương (Việt Nam)
         const getLocalDate = (date) => {
             const d = new Date(date);
-            d.setHours(d.getHours() + 7); // Cộng 7 tiếng để khớp giờ VN
+            d.setHours(d.getHours() + 7); 
             return d.toISOString().split('T')[0];
         };
 
@@ -125,11 +121,20 @@ export const getHealthMetrics = async (req, res) => {
                 deep_sleep_hours: parseFloat((day.deep_sleep / 60).toFixed(1)),
                 light_sleep_hours: parseFloat((day.light_sleep / 60).toFixed(1)),
                 rem_sleep_hours: parseFloat((day.rem_sleep / 60).toFixed(1)),
+                
+                // --- NHỊP TIM ---
                 avg_hr: day.hr_samples.length > 0 
                     ? Math.round(day.hr_samples.reduce((a, b) => a + b) / day.hr_samples.length) 
                     : 0,
                 max_hr: day.hr_samples.length > 0 ? Math.max(...day.hr_samples) : 0,
-                min_hr: day.hr_samples.length > 0 ? Math.min(...day.hr_samples) : 0
+                min_hr: day.hr_samples.length > 0 ? Math.min(...day.hr_samples) : 0,
+
+                // --- OXY MÁU (BỔ SUNG ĐỂ VẼ BOX PLOT) ---
+                avg_spo2: day.spo2_samples.length > 0 
+                    ? Math.round(day.spo2_samples.reduce((a, b) => a + b) / day.spo2_samples.length) 
+                    : 0,
+                max_spo2: day.spo2_samples.length > 0 ? Math.max(...day.spo2_samples) : 0,
+                min_spo2: day.spo2_samples.length > 0 ? Math.min(...day.spo2_samples) : 0,
             };
         });
 
@@ -137,14 +142,12 @@ export const getHealthMetrics = async (req, res) => {
             status: "success",
             view_range: range,
             daily_summary: dailySummary,
-            // Trả về dữ liệu thô đã được map stage để Mobile vẽ Timeline mượt
             raw_data: metrics.map(m => ({
                 ...m,
                 sleep_stage: m.raw_data?.sleep_stages || null 
             }))
         });
     } catch (error) {
-        //console.error("❌ Lỗi lấy Metrics:", error.message);
         return res.status(500).json({ status: "error", message: error.message });
     }
 };

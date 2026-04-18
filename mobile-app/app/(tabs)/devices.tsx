@@ -76,7 +76,7 @@ export default function DevicesScreen() {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Lỗi không xác định';
       setError(message);
-      //console.warn('⚠️ Không thể lấy danh sách thiết bị:', message);
+      console.warn('⚠️ Không thể lấy danh sách thiết bị:', message);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -139,7 +139,7 @@ export default function DevicesScreen() {
               // Cập nhật UI
               setDevices((prev) => prev.filter((d) => d.id !== device.id));
             } catch (err) {
-              //console.error('Lỗi xóa thiết bị:', err);
+              console.error('Lỗi xóa thiết bị:', err);
               Alert.alert('Lỗi', 'Không thể xóa thiết bị. Vui lòng thử lại.');
             }
           },
@@ -172,7 +172,7 @@ export default function DevicesScreen() {
         )
       );
     } catch (err) {
-      //console.error('Lỗi kết nối lại:', err);
+      console.error('Lỗi kết nối lại:', err);
       setDevices((prev) =>
         prev.map((d) =>
           d.id === device.id ? { ...d, status: 'disconnected' as DeviceStatus } : d
@@ -200,7 +200,7 @@ export default function DevicesScreen() {
         setHealthStatus('AVAILABLE');
         Alert.alert('Thành công', 'Đã kết nối với Health Connect!');
       } catch (err) {
-        //console.error('Lỗi đăng ký Health Connect:', err);
+        console.error('Lỗi đăng ký Health Connect:', err);
         // Ngay cả khi lỗi đăng ký (có thể đã tồn tại), vẫn set trạng thái nếu quyền đã cấp
         setHealthStatus('AVAILABLE');
         Alert.alert('Thông báo', 'Đã cấp quyền Health Connect. Bạn có thể bắt đầu đồng bộ.');
@@ -247,7 +247,7 @@ export default function DevicesScreen() {
         if (metrics.length > 0) {
           await api.syncMetrics({
             device_id: 'HEALTH_CONNECT',
-            metrics: metrics
+            data: metrics
           });
         }
       });
@@ -259,7 +259,7 @@ export default function DevicesScreen() {
         Alert.alert('Thông báo', 'Không có dữ liệu mới để đồng bộ.');
       }
     } catch (err) {
-      //console.error('Lỗi đồng bộ Health Connect:', err);
+      console.error('Lỗi đồng bộ Health Connect:', err);
       Alert.alert('Lỗi', 'Không thể đồng bộ dữ liệu. Vui lòng thử lại.');
     } finally {
       setSyncingHC(false);

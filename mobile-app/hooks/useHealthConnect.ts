@@ -3,6 +3,9 @@ import { Platform } from 'react-native';
 import { initialize, requestPermission, readRecords } from 'react-native-health-connect';
 import api from '../services/api';
 
+// Định nghĩa nguồn dữ liệu ưu tiên (Huawei thông qua Health Sync)
+const PRIORITY_SOURCE = 'nl.appyhapps.healthsync';
+
 export function useHealthConnect() {
   const [loading, setLoading] = useState(false);
 
@@ -18,6 +21,7 @@ export function useHealthConnect() {
         { accessType: 'read', recordType: 'HeartRate' },
         { accessType: 'read', recordType: 'OxygenSaturation' },
         { accessType: 'read', recordType: 'ActiveCaloriesBurned' },
+        { accessType: 'read', recordType: 'BasalMetabolicRate' }, // Thêm quyền đọc Calo cơ bản
         { accessType: 'read', recordType: 'Distance' },
         { accessType: 'read', recordType: 'SleepSession' },
       ]);
@@ -28,18 +32,19 @@ export function useHealthConnect() {
       const filter = { timeRangeFilter: { operator: 'between', startTime, endTime } };
 
       // 2. Fetch dữ liệu thô
-      const [steps, heart, oxygen, calories, distance, sleepSessions] = await Promise.all([
+      const [steps, heart, oxygen, calories, distance, sleepSessions, basal] = await Promise.all([
         readRecords('Steps', filter as any),
         readRecords('HeartRate', filter as any),
         readRecords('OxygenSaturation', filter as any),
         readRecords('ActiveCaloriesBurned', filter as any),
         readRecords('Distance', filter as any),
         readRecords('SleepSession', filter as any),
+        readRecords('BasalMetabolicRate', filter as any), // Lấy dữ liệu BMR
       ]);
 
       const groupedMap: Record<string, any> = {};
 
-      // 3. Hàm gộp dữ liệu thông minh
+      // 3. Hàm gộp dữ liệu thông minh (Giữ nguyên logic của Duy)
       const addToMap = (time: string, fields: any) => {
         if (!time) return;
         const date = new Date(time);
@@ -56,20 +61,20 @@ export function useHealthConnect() {
             distance: 0,
             sleep_duration: 0,
             raw_data: {},
-            hr_samples: [] // Dùng nội bộ để tính avg trong 1 phút
+            hr_samples: [] 
           };
         }
 
         const entry = groupedMap[timeKey];
 
-        // Gộp nhịp tim: Tránh bị NULL đè lên số đã có
+        // Gộp nhịp tim
         if (fields.heart_rate != null) {
           entry.hr_samples.push(fields.heart_rate);
           const sum = entry.hr_samples.reduce((a: number, b: number) => a + b, 0);
           entry.heart_rate = Math.round(sum / entry.hr_samples.length);
         }
 
-        // Gộp SpO2: Fix lỗi bị NULL trong Prisma
+        // Gộp SpO2
         if (fields.blood_oxygen != null) {
           entry.blood_oxygen = fields.blood_oxygen;
         }
@@ -80,26 +85,26 @@ export function useHealthConnect() {
         if (fields.distance != null) entry.distance += fields.distance;
         if (fields.sleep_duration != null) entry.sleep_duration += fields.sleep_duration;
 
-        // Gộp raw_data (stages)
         if (fields.raw_data) {
           entry.raw_data = { ...entry.raw_data, ...fields.raw_data };
         }
       };
 
-      // 4. XỬ LÝ NHỊP TIM (Gia cố vét cạn)
+      // 4. XỬ LÝ NHỊP TIM (Giữ nguyên)
       heart.records.forEach((record: any) => {
         if (record.samples && record.samples.length > 0) {
           record.samples.forEach((sample: any) => {
             addToMap(sample.time, { heart_rate: sample.beatsPerMinute });
           });
         } else if (record.beatsPerMinute != null) {
-          // Trường hợp bản ghi không có samples mà có giá trị trực tiếp
           addToMap(record.startTime, { heart_rate: record.beatsPerMinute });
         }
       });
 
-      // 5. XỬ LÝ GIẤC NGỦ (Giữ nguyên logic Duy đang chạy đúng)
+      // 5. XỬ LÝ GIẤC NGỦ (Giữ nguyên)
       sleepSessions.records.forEach((session: any) => {
+        if (session.metadata?.dataOrigin !== PRIORITY_SOURCE && sleepSessions.records.some(r => r.metadata?.dataOrigin === PRIORITY_SOURCE)) return;
+
         if (session.stages && session.stages.length > 0) {
           session.stages.forEach((stage: any) => {
             const s = new Date(stage.startTime).getTime();
@@ -117,20 +122,51 @@ export function useHealthConnect() {
         }
       });
 
-      // 6. XỬ LÝ CÁC CHỈ SỐ KHÁC (Fix SpO2 và Vận động)
-      steps.records.forEach((r: any) => addToMap(r.startTime, { steps: r.count }));
+      // 6. XỬ LÝ CÁC CHỈ SỐ VẬN ĐỘNG (Lọc ưu tiên Huawei/Health Sync)
       
+      // Xử lý Steps
+      steps.records.forEach((r: any) => {
+        if (r.metadata?.dataOrigin === PRIORITY_SOURCE) {
+          addToMap(r.startTime, { steps: r.count });
+        }
+      });
+      
+      // Xử lý Calories: Gộp Active + Basal để khớp con số Huawei
+      // Bước A: Cộng Active Calories (32 kcal Duy đang thấy)
+      calories.records.forEach((r: any) => {
+        if (r.metadata?.dataOrigin === PRIORITY_SOURCE) {
+          const kcal = r.energy.inKilocalories;
+          if (kcal > 0 && kcal < 200) { 
+            addToMap(r.startTime, { calories: kcal });
+          }
+        }
+      });
+
+      // Bước B: Cộng Basal Calories (Phần 90 kcal còn thiếu)
+      // BMR trong Health Connect thường ghi theo mốc thời gian (time)
+      basal.records.forEach((r: any) => {
+        if (r.metadata?.dataOrigin === PRIORITY_SOURCE) {
+          // BMR trả về kcal/ngày. Ta quy đổi ra kcal/phút tại thời điểm đó.
+          const kcalPerMinute = r.basalMetabolicRate.inKilocaloriesPerDay / 1440;
+          addToMap(r.time, { calories: kcalPerMinute });
+        }
+      });
+
+      // Xử lý Distance
+      distance.records.forEach((r: any) => {
+        if (r.metadata?.dataOrigin === PRIORITY_SOURCE) {
+          addToMap(r.startTime, { distance: r.distance.inMeters });
+        }
+      });
+
+      // Xử lý SpO2
       oxygen.records.forEach((r: any) => {
-        // OxygenSaturation đôi khi trả về samples hoặc percentage trực tiếp
         if (r.percentage != null) {
             addToMap(r.time, { blood_oxygen: r.percentage });
         }
       });
 
-      calories.records.forEach((r: any) => addToMap(r.startTime, { calories: r.energy.inKilocalories }));
-      distance.records.forEach((r: any) => addToMap(r.startTime, { distance: r.distance.inMeters }));
-
-      // 7. Tạo Payload cuối cùng (Lọc sạch record rỗng)
+      // 7. Tạo Payload cuối cùng (Giữ nguyên)
       const finalPayload = Object.values(groupedMap)
         .filter((item: any) => {
           return item.steps > 0 || 
@@ -141,19 +177,16 @@ export function useHealthConnect() {
         })
         .map(({ hr_samples, ...rest }) => rest);
 
-      // 8. Đẩy lên Server
+      // 8. Đẩy lên Server (Giữ nguyên)
       if (finalPayload.length > 0) {
-        //console.log(`📡 [Sync] Đang gửi ${finalPayload.length} phút dữ liệu lên Server...`);
-        const response = await api.syncMetrics({ data: finalPayload });
-        //console.log(`🚀 [Server] Đồng bộ thành công: ${response.count} dòng.`);
+        await api.syncMetrics({ data: finalPayload });
         return true;
       }
 
-      //console.log("⚠️ [Sync] Không có dữ liệu mới để đồng bộ.");
       return false;
 
     } catch (error: any) {
-      //console.error("❌ [Sync Error]:", error.message);
+      console.error("❌ [Sync Error]:", error.message);
       return false;
     } finally {
       setLoading(false);

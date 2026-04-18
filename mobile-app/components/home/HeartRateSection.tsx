@@ -1,92 +1,115 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { Colors, Typography, Spacing } from '../../constants/Colors';
+import { Colors } from '../../constants/Colors';
 import MetricCard from './MetricCard';
 import { router } from 'expo-router';
+
+// Định nghĩa interface cho dữ liệu thô
+interface HeartRateRaw {
+  heart_rate: number;
+  avg_hr?: number; // Dùng cho dailySummary
+}
 
 interface HeartRateSectionProps {
   current: number;
   avg: number;
   history: number[];
+  timeRange: 'day' | 'week' | 'month';
+  rawData: HeartRateRaw[]; 
 }
 
-const HeartRateSection: React.FC<HeartRateSectionProps> = ({ current, avg, history }) => {
-  // --- DEBUG //console ---
-  //console.log('--- [DEBUG HEART RATE SECTION] ---');
-  //console.log('Current (Gần nhất):', current);
-  //console.log('Avg (Trung bình):', avg);
-  //console.log('History (Mảng lịch sử):', history);
-  //console.log('Số lượng điểm đo trong mảng:', history?.length || 0);
-  // ---------------------
-
-  // Tính toán các chỉ số bổ sung
-  const maxHr = history && history.length > 0 ? Math.max(...history) : 0;
-  const minHr = history && history.length > 0 ? Math.min(...history) : 0;
+const HeartRateSection: React.FC<HeartRateSectionProps> = ({ current, avg, history, timeRange, rawData }) => {
   
-  // Tính toán chiều cao cho biểu đồ mini
-  const chartMax = maxHr || 100;
-  const chartMin = minHr || 40;
-  const range = chartMax - chartMin || 1;
+  // 1. Tính toán Min/Max/Avg chính xác từ rawData
+  const stats = useMemo(() => {
+    if (!rawData || rawData.length === 0) return { min: 0, max: 0, avg: 0 };
+    
+    const validHR = rawData
+      .map((r: HeartRateRaw) => r.heart_rate || r.avg_hr) // Fix lỗi tham số 'r'
+      .filter((v): v is number => v != null && v > 0);
+
+    if (validHR.length === 0) return { min: 0, max: 0, avg: 0 };
+
+    return {
+      min: Math.min(...validHR),
+      max: Math.max(...validHR),
+      avg: Math.round(validHR.reduce((a: number, b: number) => a + b, 0) / validHR.length)
+    };
+  }, [rawData]);
+
+  // 2. Logic vẽ biểu đồ theo từng Tab
+  const chartData = useMemo(() => {
+    if (!history || history.length === 0) return [];
+
+    let displayData = [...history];
+    if (timeRange === 'day') displayData = history.slice(-35); 
+    
+    const validValues = displayData.filter((v: number) => v > 0);
+    const cMax = validValues.length > 0 ? Math.max(...validValues) : 100;
+    const cMin = validValues.length > 0 ? Math.min(...validValues) : 40;
+    const cRange = (cMax - cMin) || 1;
+
+    return displayData.map((v: number) => ({
+      value: v,
+      // Chiều cao bar tối thiểu 3px, tối đa 40px
+      height: v > 0 ? ((v - cMin) / cRange) * 35 + 5 : 2, 
+    }));
+  }, [history, timeRange]);
 
   return (
     <MetricCard
       title="Nhịp tim"
-      subtitle="Chỉ số đo gần nhất"
-      value={current || '--'} 
+      subtitle={timeRange === 'day' ? "Chỉ số gần nhất" : "Trung bình giai đoạn"}
+      value={current > 0 ? current : (stats.avg > 0 ? stats.avg : '--')} 
       unit="BPM"
       icon="heart"
       iconColor={Colors.health.heartRate}
       onPress={() => router.push('/(health)/heart-rate-detail')}
     >
-      {/* 1. Biểu đồ xu hướng mini */}
+      {/* 1. Biểu đồ xu hướng */}
       <View style={styles.chartContainer}>
         <View style={styles.miniChart}>
-          {history && history.length > 0 ? (
-            history.map((v: number, i: number) => {
-                // Log thử chiều cao của bar đầu tiên để check logic vẽ
-                if(i === 0) //console.log('Mẫu bar height:', ((v - chartMin) / range) * 30 + 5);
-                
-                return (
-                  <View
-                    key={i}
-                    style={[
-                      styles.miniChartBar,
-                      {
-                        height: ((v - chartMin) / range) * 30 + 5,
-                        backgroundColor:
-                          i === history.length - 1
-                            ? Colors.health.heartRate
-                            : Colors.health.heartRate + '40',
-                      },
-                    ]}
-                  />
-                );
-            })
+          {chartData.length > 0 ? (
+            chartData.map((point, i) => (
+              <View
+                key={i}
+                style={[
+                  styles.miniChartBar,
+                  {
+                    height: point.height,
+                    backgroundColor: i === chartData.length - 1 
+                      ? Colors.health.heartRate 
+                      : Colors.health.heartRate + '40',
+                    width: timeRange === 'day' ? 4 : (timeRange === 'week' ? 18 : 6)
+                  },
+                ]}
+              />
+            ))
           ) : (
-            <Text style={styles.noDataText}>Chưa có dữ liệu lịch sử</Text>
+            <Text style={styles.noDataText}>Không có dữ liệu nhịp tim</Text>
           )}
         </View>
       </View>
 
-      {/* 2. Hàng chỉ số chi tiết: Min - Avg - Max */}
+      {/* 2. Chỉ số Min - Avg - Max */}
       <View style={styles.statsRow}>
         <View style={styles.statItem}>
           <Text style={styles.statLabel}>Thấp nhất</Text>
-          <Text style={styles.statValue}>{minHr || '--'}</Text>
+          <Text style={styles.statValue}>{stats.min > 0 ? stats.min : '--'}</Text>
         </View>
         
         <View style={styles.divider} />
         
         <View style={styles.statItem}>
           <Text style={styles.statLabel}>Trung bình</Text>
-          <Text style={styles.statValue}>{avg || '--'}</Text>
+          <Text style={styles.statValue}>{stats.avg > 0 ? stats.avg : '--'}</Text>
         </View>
         
         <View style={styles.divider} />
         
         <View style={styles.statItem}>
           <Text style={styles.statLabel}>Cao nhất</Text>
-          <Text style={styles.statValue}>{maxHr || '--'}</Text>
+          <Text style={styles.statValue}>{stats.max > 0 ? stats.max : '--'}</Text>
         </View>
       </View>
     </MetricCard>
@@ -103,13 +126,11 @@ const styles = StyleSheet.create({
   miniChart: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    height: 40,
+    height: 45,
     gap: 3,
   },
   miniChartBar: {
-    width: 6,
-    borderRadius: 3,
-    minHeight: 5,
+    borderRadius: 2,
   },
   statsRow: {
     flexDirection: 'row',
@@ -120,32 +141,11 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#F1F5F9',
   },
-  statItem: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  statLabel: {
-    fontSize: 10,
-    color: '#64748B',
-    marginBottom: 2,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  statValue: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#1E293B',
-  },
-  divider: {
-    width: 1,
-    height: 20,
-    backgroundColor: '#E2E8F0',
-  },
-  noDataText: {
-    fontSize: 12,
-    color: '#94A3B8',
-    fontStyle: 'italic',
-  }
+  statItem: { flex: 1, alignItems: 'center' },
+  statLabel: { fontSize: 10, color: '#64748B', marginBottom: 2, textTransform: 'uppercase' },
+  statValue: { fontSize: 14, fontWeight: '700', color: '#1E293B' },
+  divider: { width: 1, height: 20, backgroundColor: '#E2E8F0' },
+  noDataText: { fontSize: 12, color: '#94A3B8', fontStyle: 'italic' }
 });
 
 export default HeartRateSection;
